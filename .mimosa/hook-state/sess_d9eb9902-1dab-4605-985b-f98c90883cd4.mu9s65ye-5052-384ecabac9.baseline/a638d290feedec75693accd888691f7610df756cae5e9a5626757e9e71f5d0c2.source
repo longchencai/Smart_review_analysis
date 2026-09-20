@@ -1,4 +1,4 @@
-﻿# ============================================
+# ============================================
 # EDA探索性数据分析 - 优化版（9张图）
 # ============================================
 
@@ -10,9 +10,9 @@ from wordcloud import WordCloud
 import os
 
 # ---------- 配置 ----------
-DATA_PATH = "../data/processed/final_data/train.csv"
+DATA_PATH = "../data/processed/exp_b_9class/train.csv"
 FIG_DIR = "../data/figures/"
-STOPWORDS_PATH = "../data/processed/final_data/stopwords.txt"
+STOPWORDS_PATH = "../data/processed/exp_b_9class/stopwords.txt"
 
 os.makedirs(FIG_DIR, exist_ok=True)
 
@@ -69,9 +69,9 @@ plt.close()
 # ============================================
 print("图2：类别分布...")
 plt.figure(figsize=(9, 6))
-cat_counts = df['cat_l1'].value_counts()
+cat_counts = df['cat'].value_counts()
 bars = plt.barh(cat_counts.index, cat_counts.values, color=COLOR_PRIMARY)
-plt.title(f'商品类别分布（共{df["cat_l1"].nunique()}个类别）', fontsize=13)
+plt.title(f'商品类别分布（共{df["cat"].nunique()}个类别）', fontsize=13)
 plt.xlabel('评论数量', fontsize=11)
 for bar in bars:
     width = bar.get_width()
@@ -86,7 +86,7 @@ plt.close()
 # ============================================
 print("图3：类别×标签热力图...")
 plt.figure(figsize=(9, 6))
-heatmap_data = pd.crosstab(df['cat_l1'], df['label'], normalize='index') * 100
+heatmap_data = pd.crosstab(df['cat'], df['label'], normalize='index') * 100
 heatmap_data.columns = ['负面%', '正面%']
 sns.heatmap(heatmap_data, annot=True, fmt='.1f', cmap='RdYlGn', cbar_kws={'label': '占比 (%)'})
 plt.title('各类别下的正负情感比例', fontsize=13)
@@ -132,7 +132,7 @@ plt.close()
 # ============================================
 print("图6：按类别分的评论长度...")
 plt.figure(figsize=(9, 6))
-cat_length = df.groupby('cat_l1')['review_length'].mean().sort_values()
+cat_length = df.groupby('cat')['review_length'].mean().sort_values()
 bars = plt.barh(cat_length.index, cat_length.values, color=COLOR_ORANGE)
 plt.title('各类别平均评论长度', fontsize=13)
 plt.xlabel('平均字数', fontsize=11)
@@ -227,5 +227,3 @@ plt.savefig(f"{FIG_DIR}/09_wordcloud.png", bbox_inches='tight')
 plt.close()
 
 print(f"\n✅ 全部9张图完成！保存在：{FIG_DIR}")
-
-
