@@ -3,7 +3,7 @@ import os
 
 class Config():
     def __init__(self):
-        #项目根路径(本文件在 项目根/src/rf/config.py,向上三级就是项目根;用/拼接,和示例写法保持一致)
+        #项目根路径(本文件在 项目根/models/rf/config.py,向上三级就是项目根;用/拼接,和示例写法保持一致)
         self.root_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))).replace(os.sep, '/') + '/'
 
         #各种路径
@@ -17,17 +17,17 @@ class Config():
         self.class_path = self.root_path + 'data/processed/final_data/class.txt'
 
         # 随机森林处理后数据存放路径(三列:words,cat_label,sent_label)
-        self.process_train_path = self.root_path + 'src/rf/processed_data/train.txt'
-        self.process_test_path = self.root_path + 'src/rf/processed_data/test.txt'
-        self.process_dev_path = self.root_path + 'src/rf/processed_data/val.txt'
+        self.process_train_path = self.root_path + 'models/rf/processed_data/train.txt'
+        self.process_test_path = self.root_path + 'models/rf/processed_data/test.txt'
+        self.process_dev_path = self.root_path + 'models/rf/processed_data/val.txt'
 
         # 随机森林模型存放路径(7分类)
-        self.rf_save_model_path = self.root_path + 'src/rf/model/rf_model.pkl'
-        self.tfidf_save_path = self.root_path + 'src/rf/model/tfidf_model.pkl'
+        self.rf_save_model_path = self.root_path + 'models/rf/model/rf_model.pkl'
+        self.tfidf_save_path = self.root_path + 'models/rf/model/tfidf_model.pkl'
 
         # 随机森林模型存放路径(情感二分类)
-        self.rf_sentiment_save_model_path = self.root_path + 'src/rf/model/rf_model_sentiment.pkl'
-        self.tfidf_sentiment_save_path = self.root_path + 'src/rf/model/tfidf_model_sentiment.pkl'
+        self.rf_sentiment_save_model_path = self.root_path + 'models/rf/model/rf_model_sentiment.pkl'
+        self.tfidf_sentiment_save_path = self.root_path + 'models/rf/model/tfidf_model_sentiment.pkl'
 
         # 分词产物里两个任务各自的标签列名
         self.cat_label_col = 'cat_label'
