@@ -6,6 +6,7 @@ import os
 
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 import seaborn as sns
 import jieba
 from wordcloud import WordCloud
@@ -21,8 +22,38 @@ FIG_DIR = os.path.join(BASE_DIR, "data", "figures", "final_data")  # 与数据�
 
 os.makedirs(FIG_DIR, exist_ok=True)
 
+# ---------- 中文字体（跨平台探测） ----------
+# 各操作系统的中文字体名不同，仓库里也不带字体文件。找不到时 matplotlib 只是回退
+# 默认字体（中文显示成方框），但 WordCloud 会直接抛 OSError —— 所以先用它探测一次，
+# 由结果决定是否跳过图 9，而不是让脚本崩在已经写完图 1-8 之后。
+FONT_CANDIDATES = [
+    'Microsoft YaHei', 'SimHei', 'PingFang SC', 'Hiragino Sans GB',
+    'Noto Sans CJK SC', 'Source Han Sans CN', 'WenQuanYi Micro Hei', 'Arial Unicode MS',
+]
+
+
+def pick_font_file():
+    """返回本机第一个可用中文字体的文件路径；一个都没有则返回 None。"""
+    for name in FONT_CANDIDATES:
+        try:
+            path = font_manager.findfont(font_manager.FontProperties(family=name),
+                                         fallback_to_default=False)
+        except ValueError:
+            continue
+        if os.path.exists(path):
+            return path
+    return None
+
+
+FONT_FILE = pick_font_file()
+
 # 统一风格
-plt.rcParams['font.sans-serif'] = ['SimHei']
+if FONT_FILE is None:
+    print("⚠️ 未检测到中文字体：图中中文可能显示为方框，图 9（词云）将被跳过。")
+    print(f"   修复办法：安装任一中文字体，或把字体名/路径加入 FONT_CANDIDATES：{FONT_CANDIDATES}")
+else:
+    plt.rcParams['font.sans-serif'] = [font_manager.FontProperties(fname=FONT_FILE).get_name(),
+                                       'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['figure.dpi'] = 150
 plt.rcParams['font.size'] = 11
@@ -222,24 +253,30 @@ for text in df['review']:
 
 text = ' '.join(all_words)
 
-wc = WordCloud(
-    font_path='simhei.ttf',
-    width=800,
-    height=600,
-    background_color='white',
-    stopwords=stopwords,
-    max_words=100
-)
-wc.generate(text)
+if FONT_FILE is None:
+    print("   跳过：本机没有可用中文字体，WordCloud 无法渲染中文")
+else:
+    wc = WordCloud(
+        font_path=FONT_FILE,
+        width=800,
+        height=600,
+        background_color='white',
+        stopwords=stopwords,
+        max_words=100
+    )
+    wc.generate(text)
 
-plt.figure(figsize=(10, 8))
-plt.imshow(wc, interpolation='bilinear')
-plt.axis('off')
-plt.title('评论高频词词云', fontsize=13)
-plt.tight_layout()
-plt.savefig(f"{FIG_DIR}/09_wordcloud.png", bbox_inches='tight')
-plt.close()
+    plt.figure(figsize=(10, 8))
+    plt.imshow(wc, interpolation='bilinear')
+    plt.axis('off')
+    plt.title('评论高频词词云', fontsize=13)
+    plt.tight_layout()
+    plt.savefig(f"{FIG_DIR}/09_wordcloud.png", bbox_inches='tight')
+    plt.close()
 
-print(f"\n✅ 全部9张图完成！保存在：{FIG_DIR}")
+n_figs = 8 if FONT_FILE is None else 9
+print(f"\n✅ 完成 {n_figs} 张图，保存在：{FIG_DIR}")
+if FONT_FILE is None:
+    print("   注意：若该目录里仍有 09_wordcloud.png，那是上一次运行留下的旧图")
 
 

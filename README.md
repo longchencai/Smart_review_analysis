@@ -44,6 +44,7 @@ ai8_-project1/
 │   │   └── final_data/         # 最终数据（7大类 + 情感）
 │   └── figures/final_data/    # EDA可视化图表（9张，由第3步生成）
 ├── src/                       # 代码目录
+│   ├── config.py                   # 配置入口（模型组与后续脚本使用）
 │   ├── data_preprocess.py          # 数据清洗脚本（第1步）
 │   ├── generate_fasttext_data.py   # FastText格式数据生成（第2步）
 │   ├── eda_analysis.py             # EDA分析脚本（第3步）
@@ -93,6 +94,8 @@ python src/generate_fasttext_data.py     # 第2步：生成 FastText 格式数�
 python src/eda_analysis.py               # 第3步：生成 EDA 图表
 ```
 
+> EDA 会自动探测本机的中文字体（Windows/macOS/Linux 字体名不同，仓库里不带字体文件）。找不到字体时**跳过图 9（词云）并打印提示，不会中断**，其余 8 张图正常生成；此时图中中文可能显示为方框，安装任一中文字体即可。
+
 ### 数据质量复核
 
 ```bash
@@ -139,6 +142,44 @@ for split in ('train', 'val', 'test'):
             text, label = line.rstrip('\n').split('\t')
             fout.write(f'__label__{label} {text}\n')
 ```
+
+### 给模型组的配置与数据读取
+
+`src/config.py` 是模型组与后续新脚本的统一入口：
+
+```python
+from config import TRAIN_CSV, VAL_CSV, TEST_CSV, CLASS_ORDER, SENTIMENT_MAP, MAX_LEN, load_csv
+```
+
+脚本放在 `src/` 下即可直接导入（无需任何额外处理）。若确有脚本要放在 `src/` 之外，先加两行把它纳入搜索路径：
+
+```python
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+```
+
+直接运行 `python src/config.py` 可自检配置（打印路径、类别编号、各划分行数）。
+
+**标签定义从 `class.txt` 派生，不要另抄一份。** `CLASS_ORDER` / `CLASS_TO_ID` 读的就是 `final_data/class.txt` 的行序 —— 它同时是 `train.txt` 等文件里类别编号的权威定义，因此不会与实际数据脱节。
+
+**推荐用封装好的读取函数，两个坑已经封在函数里：**
+
+| 函数 | 返回 | 说明 |
+|---|---|---|
+| `load_csv(split)` | DataFrame | 读 `train/val/test.csv`，自动处理 BOM（否则首列名会变成 `\ufeffreview`） |
+| `load_fasttext_split(split)` | `(texts, labels)` | 读 `train/val/test.txt`，内部用 `QUOTE_NONE`（否则静默少读 487 行） |
+| `load_stopwords()` | set | 停用词表 |
+
+**数据路径**：`TRAIN_CSV` / `VAL_CSV` / `TEST_CSV` / `TRAIN_TXT` / `VAL_TXT` / `TEST_TXT`；需要按名字遍历用 `split_csv(split)` / `split_txt(split)`。另有 `DATA_DIR`、`RAW_CSV`、`CLASS_FILE`、`STOPWORDS_FILE`、`FIG_DIR`、`data_file(name)`。
+
+**模型侧**：`MODELS_DIR`（即 `models/`）与 `model_path("rf/model.pkl")` —— 可含子目录，越界会被拒绝；**目录不会自动创建，需要时自行 mkdir**。
+
+**标签与契约**：`CLASS_ORDER`、`CLASS_TO_ID`、`NUM_CLASSES`、`SENTIMENT_MAP`、`COLUMNS`、`CAT_COL`、`LABEL_COL`、`SPLITS`、`CSV_ENCODING`、`TXT_ENCODING`。
+
+**超参建议初值**（只是起点，按需覆盖）：`EPOCHS=3`、`BATCH_SIZE=32`、`LR=5e-5`、`MAX_LEN=256`、`RANDOM_SEED=42`。`MAX_LEN` 取 256 的理由见「已知局限」第 3 条。
+
+> **为什么数据组的脚本不 import config**：`data_preprocess.py` 等脚本必须能**单独复制出去运行**；而 config 是模型组会持续修改的文件，让已冻结的数据流水线依赖它，等于把外部改动风险引到已经冻结的资产上。所以那边保持自包含 —— 两边定位路径的方式不同，但指向同一份数据。
 
 ### 模型训练
 
