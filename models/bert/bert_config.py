@@ -5,13 +5,17 @@ import os
 
 
 # 定义文件
+# 项目根目录：从本文件位置自动推算（本文件位于 models/bert/bert_config.py）
+# 向上两级即为项目根，避免硬编码某台机器的绝对路径，换机器 clone 后也能正确解析
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 class Config():
     def __init__(self):
         print('正在初始化配置文件....')
         # 各种路径
         # TODO 1.原始数据路径
-        # 改成当前项目的根目录
-        self.root_path = 'D:/商品评论智能系统/ai8_-project1/'
+        # 基于脚本位置动态推算项目根（相对路径，不再写死绝对路径）
+        self.root_path = _PROJECT_ROOT + '/'
         self.data_dir = self.root_path + 'data/processed/final_data/'
         self.train_path = self.data_dir + 'train.csv'
         self.val_path = self.data_dir + 'val.csv'
@@ -32,6 +36,8 @@ class Config():
         #   ② 原项目已下载好的路径（直接复用，免拷贝、省 C 盘空间）
         #   ③ 都没有才从 HuggingFace 下载
         self.bert_base_chinese_path = self.root_path + 'models/bert-base-chinese'
+        # legacy：原项目已下载的权重（跨项目复用，本机绝对路径）
+        # 其他机器若没有此目录会自动跳过，回退到从 HuggingFace 下载，故无需改成相对路径
         self.bert_base_chinese_path_legacy = 'D:/投满分1.0/_04_bert_base/bert-base-chinese'
         os.makedirs(self.root_path + 'models/', exist_ok=True)
         model_candidates = [self.bert_base_chinese_path, self.bert_base_chinese_path_legacy, 'bert-base-chinese']
