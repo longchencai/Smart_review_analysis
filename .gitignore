@@ -146,5 +146,23 @@ _mine_backup/
 
 # 大模型权重不入库：Gitee 免费版单文件上限 100MB，LFS 仅企业版开放
 # 这些文件保留在本地磁盘，需要时用网盘/HuggingFace 等另行共享
-models/bert/model/*.pt
+#
+# 注意（2026-09 修订）：旧规则用了 src/rf/ 前缀，但该目录后来搬到了 models/rf/，
+# 规则随之失效，导致 418MB 的 rf_model*.pkl 被误提交进 master。
+# 这里统一改成 models/** 通配，并补上 dist 蒸馏目录，避免再因"目录搬家"踩同一个坑。
+models/**/model/*.pt
+models/**/model/*.pkl
+models/**/model/*.bin
+models/**/model/*.onnx
+models/**/cache/
+models/**/bert-base-chinese/*.safetensors
+models/**/bert-base-chinese/*.bin
 src/rf/model/rf_model*.pkl
+*.safetensors
+
+# 例外：蒸馏产出的学生模型是最终交付物，体积可控（fp32 59MB / int8 15MB），
+# 而且 Web 部署要用量化后的那一份，所以明确放行。
+# 如果团队决定一律不入库，删掉这两行即可。
+!models/bert_distillation_quantization/model/student_bert_4l384.pt
+!models/bert_distillation_quantization/model/student_bert_4l384_int8.pt
+
