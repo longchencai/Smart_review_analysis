@@ -136,3 +136,7 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# 工具/编辑器产生的本地目录，不入版本库
+.mimosa/
+.zcode/

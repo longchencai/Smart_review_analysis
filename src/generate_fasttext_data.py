@@ -1,6 +1,6 @@
 # ============================================
 # 生成FastText格式数据
-# 输出：class.txt, train.txt, val.txt, test.txt
+# 输出：class.txt（标签编号定义）, train.txt, val.txt, test.txt
 # 格式：文本<Tab>类别编号
 # ============================================
 
@@ -10,14 +10,13 @@ import os
 # ---------- 配置 ----------
 DATA_DIR = "../data/processed/final_data/"
 
-# 读数据
-train_df = pd.read_csv(f"{DATA_DIR}/train.csv")
-val_df = pd.read_csv(f"{DATA_DIR}/val.csv")
-test_df = pd.read_csv(f"{DATA_DIR}/test.csv")
+# 读数据（数据 CSV 带 BOM，需显式指定 encoding）
+train_df = pd.read_csv(f"{DATA_DIR}/train.csv", encoding='utf-8-sig')
+val_df = pd.read_csv(f"{DATA_DIR}/val.csv", encoding='utf-8-sig')
+test_df = pd.read_csv(f"{DATA_DIR}/test.csv", encoding='utf-8-sig')
 
-# 读类别名（7个一级大类）
-with open(f"{DATA_DIR}/class_names_l1.txt", 'r', encoding='utf-8') as f:
-    class_names = [line.strip() for line in f.readlines()]
+# 类别名直接从数据推导（sorted 顺序），不依赖额外的名称文件
+class_names = sorted(set(train_df['cat_l1']) | set(val_df['cat_l1']) | set(test_df['cat_l1']))
 
 # 建立类别到编号的映射
 class_to_id = {name: i for i, name in enumerate(class_names)}
