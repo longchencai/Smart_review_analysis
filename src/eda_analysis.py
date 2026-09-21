@@ -2,17 +2,22 @@
 # EDA探索性数据分析 - 优化版（9张图）
 # ============================================
 
+import os
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import jieba
 from wordcloud import WordCloud
-import os
 
 # ---------- 配置 ----------
-DATA_PATH = "../data/processed/final_data/train.csv"
-FIG_DIR = "../data/figures/"
-STOPWORDS_PATH = "../data/processed/final_data/stopwords.txt"
+# 基于脚本自身位置解析，因此在任何目录下运行都可以
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data", "processed", "final_data")
+
+DATA_PATH = os.path.join(DATA_DIR, "train.csv")
+STOPWORDS_PATH = os.path.join(DATA_DIR, "stopwords.txt")
+FIG_DIR = os.path.join(BASE_DIR, "data", "figures", "final_data")  # 与数据版本同名，避免和旧数据集混在一起
 
 os.makedirs(FIG_DIR, exist_ok=True)
 
@@ -28,7 +33,7 @@ COLOR_NEG = '#EA6668'
 COLOR_PRIMARY = '#9BBBF4'
 COLOR_ORANGE = '#F4B393'
 
-df = pd.read_csv(DATA_PATH)
+df = pd.read_csv(DATA_PATH, encoding='utf-8-sig')   # 数据 CSV 带 BOM，需显式指定
 print(f"读入数据：{len(df)} 条")
 
 # 读停用词
@@ -39,7 +44,8 @@ with open(STOPWORDS_PATH, 'r', encoding='utf-8') as f:
 print("\n=== 基础数据统计 ===")
 print(f"总样本数：{len(df)}")
 print(f"缺失值：\n{df.isnull().sum()}")
-print(f"重复评论数：{df.duplicated().sum()} ({df.duplicated().sum()/len(df)*100:.1f}%)")
+n_dup = df.duplicated().sum()
+print(f"重复评论数：{n_dup} ({n_dup/len(df)*100:.1f}%)")
 
 df['review_length'] = df['review'].str.len()
 p99 = df['review_length'].quantile(0.99)
@@ -50,9 +56,11 @@ print(f"评论长度：平均{df['review_length'].mean():.0f}字，P99={p99:.0f}
 # ============================================
 print("\n图1：标签分布...")
 plt.figure(figsize=(7, 5))
-sentiment = df['label'].value_counts()
-colors = [COLOR_NEG if i == 0 else COLOR_POS for i in sentiment.index]
-bars = plt.bar(['负面评价', '正面评价'], sentiment.values, color=colors, width=0.6)
+# 必须按 label 取值 (0, 1) 显式取数。value_counts() 是按数量降序返回的，直接接它的
+# values 会在 label=1 数量更多时把「负面/正面」两个柱子的数值和颜色对调。
+counts = df['label'].value_counts().reindex([0, 1], fill_value=0)
+bars = plt.bar(['负面评价', '正面评价'], counts.values,
+               color=[COLOR_NEG, COLOR_POS], width=0.6)
 plt.title(f'正负情感标签分布（共{len(df)}条）', fontsize=13)
 plt.ylabel('评论数量', fontsize=11)
 for bar in bars:
@@ -101,10 +109,10 @@ plt.close()
 # ============================================
 print("图4：评论长度分布...")
 plt.figure(figsize=(9, 5))
+mean_len = df['review_length'].mean()
 plt.hist(df[df['review_length'] <= p99]['review_length'], bins=50, 
          color='#A2DDAA', edgecolor='white')
-plt.axvline(df['review_length'].mean(), color='red', linestyle='--', 
-            label=f'平均：{df["review_length"].mean():.0f}字')
+plt.axvline(mean_len, color='red', linestyle='--', label=f'平均：{mean_len:.0f}字')
 plt.title(f'评论长度分布（显示至P99={p99:.0f}字）', fontsize=13)
 plt.xlabel('评论字数', fontsize=11)
 plt.ylabel('评论数量', fontsize=11)
@@ -118,7 +126,8 @@ plt.close()
 # ============================================
 print("图5：按情感分的评论长度...")
 plt.figure(figsize=(7, 6))
-sns.boxplot(x='label', y='review_length', data=df, palette=[COLOR_NEG, COLOR_POS])
+sns.boxplot(x='label', y='review_length', data=df, hue='label',
+            palette=[COLOR_NEG, COLOR_POS], legend=False)
 plt.ylim(0, p99)
 plt.title(f'不同情感的评论长度对比（P99={p99:.0f}）', fontsize=13)
 plt.xlabel('情感（0=负面, 1=正面）', fontsize=11)
@@ -148,15 +157,20 @@ plt.close()
 # 图7：高频重复评论TOP10（带占比）
 # ============================================
 print("图7：高频重复评论TOP10...")
-top_reviews = df['review'].value_counts().head(10)
+vc = df['review'].value_counts()
+top_reviews = vc.head(10)
+# 清洗阶段已按（大类, 文本）去重，所以不存在整行重复；这里统计的是「文本重复」的规模，
+# 避免标题用整行重复率（恒为 0）而与图中出现 2 次的柱子自相矛盾。
+dup_row_share = vc[vc >= 2].sum() / len(df) * 100
 plt.figure(figsize=(10, 6))
 bars = plt.barh(range(len(top_reviews)), top_reviews.values, color='#E1B98F')
 plt.yticks(range(len(top_reviews)), 
            [f'{r[:25]}...' if len(r)>25 else r for r in top_reviews.index])
-plt.title(f'高频重复评论TOP10（重复率{df.duplicated().sum()/len(df)*100:.1f}%）', fontsize=13)
+plt.title(f'高频重复评论文本TOP10（重复文本的评论占比{dup_row_share:.2f}%，同文本最多出现{vc.max()}次）', fontsize=12)
 plt.xlabel('出现次数', fontsize=11)
+plt.xlim(0, max(top_reviews.max() * 1.8, 3))   # 留出右侧空间，否则柱顶标注会被裁掉
 for i, (v, bar) in enumerate(zip(top_reviews.values, bars)):
-    plt.text(v + 1, i, f'{v}次 ({v/len(df)*100:.2f}%)', va='center', fontsize=9)
+    plt.text(v + 0.05, i, f'{v}次', va='center', fontsize=9)
 plt.tight_layout()
 plt.savefig(f"{FIG_DIR}/07_top_repeated_reviews.png", bbox_inches='tight')
 plt.close()
