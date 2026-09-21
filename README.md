@@ -115,7 +115,7 @@ python src/data_audit.py                 # 只读脚本，打印本文档引用�
 >
 > 分层键同时包含类别与情感（共 7 × 2 = 14 个格子），因此 train / val / test 的正负样本比例一致（各类偏差 < 0.25pp），**在 val 上调出的结论可以直接迁移到 test**；若只按类别分层，各类别正负比例会在三份集合间漂移，最严重的达 10pp 以上。
 >
-> **编码约定**：CSV 为 UTF-8 **带 BOM**（便于 Excel 直接打开中文不乱码），TXT 为 UTF-8 **不带 BOM**；行尾均为 CRLF。读取 CSV 时请显式写 `encoding='utf-8-sig'`，否则 pandas 会把首列名读成 `\ufeffreview`；读取 TXT 用文本模式即可（若按二进制解析，注意行尾带 `\r`）。
+> **编码约定**：CSV 为 UTF-8 **带 BOM**（便于 Excel 直接打开中文不乱码），TXT 为 UTF-8 **不带 BOM**；行尾均为 CRLF。读取 CSV 请显式写 `encoding='utf-8-sig'` —— pandas 通常能自动剥离 BOM，但标准库 `csv` 模块不会（会读到 `\ufeffreview`），显式指定对所有读取端都安全；读取 TXT 用文本模式即可（若按二进制解析，注意行尾带 `\r`）。
 
 ### 读取 train.txt / val.txt / test.txt
 
@@ -131,6 +131,8 @@ df = pd.read_csv('data/processed/final_data/train.txt', sep='\t', header=None,
                  names=['review', 'label'], quoting=csv.QUOTE_NONE, encoding='utf-8')
 # 应读到 43,820 行；若只有 43,333 行，就是漏了 quoting=csv.QUOTE_NONE
 ```
+
+> ⚠️ **这条只适用于 `.txt`（TSV）。不要给 CSV 也加 `QUOTE_NONE`** —— CSV 是标准带引号格式，加上会直接解析报错（实测 `ParserError: Expected 3 fields in line 37, saw 5`）。读 CSV 请用 `load_csv()`，或显式指定 `encoding='utf-8-sig'`。
 
 **② 若要使用 `fasttext` 命令行或官方 API**，需先转成官方格式（类别号在前并加 `__label__` 前缀）：
 

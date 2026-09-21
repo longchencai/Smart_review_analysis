@@ -44,6 +44,17 @@ if not CLASS_FILE.exists():
         "请确认 data/processed/final_data/ 已从仓库完整拉取。"
     )
 CLASS_ORDER = tuple(CLASS_FILE.read_text(encoding="utf-8").split())
+
+# 内容校验：空文件或有重复行的 class.txt 都会让标签编号静默错位
+# （重复行会让 dict 覆盖，导致某个编号凭空消失），所以直接报错而不是带着坏映射继续跑。
+if not CLASS_ORDER:
+    raise ValueError(f"{CLASS_FILE} 是空文件，无法确定标签编号。")
+if len(set(CLASS_ORDER)) != len(CLASS_ORDER):
+    dup = sorted({n for n in CLASS_ORDER if CLASS_ORDER.count(n) > 1})
+    raise ValueError(
+        f"{CLASS_FILE} 存在重复的类别名 {dup}，会让标签编号错位，请修正后重试。"
+    )
+
 CLASS_TO_ID = {name: i for i, name in enumerate(CLASS_ORDER)}
 NUM_CLASSES = len(CLASS_ORDER)
 
@@ -162,4 +173,33 @@ if __name__ == "__main__":
         texts, labels = load_fasttext_split(split)
         print(f"{split:<6} CSV {len(frame):>6} 行   TSV {len(texts):>6} 行   "
               f"类别数 {frame[CAT_COL].nunique()}")
-    print("✅ 自检通过：路径可解析、class.txt 可读、CSV 与 TSV 行数一致")
+        if labels and (min(labels) < 0 or max(labels) >= NUM_CLASSES):
+            raise AssertionError(f"{split}.txt 的类别编号超出 0..{NUM_CLASSES - 1} 范围")
+
+    # 防护自检：越界路径必须被拒绝，合法路径必须放行
+    print("-" * 56)
+    print("防护自检：")
+    for bad in ("../x.txt", "sub/../../x", "/etc/passwd", "C:/Windows/win.ini", ""):
+        try:
+            data_file(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"越界路径未被拦截：{bad!r}")
+    assert data_file("train.csv") == TRAIN_CSV
+    assert model_path("rf/model.pkl").name == "model.pkl"
+    print("  越界文件路径全部被拦截，合法路径正常放行")
+
+    # 一致性自检：class.txt 必须与数据里实际出现的类别完全一致
+    in_data = set()
+    for split in SPLITS:
+        in_data |= set(load_csv(split)[CAT_COL])
+    if in_data != set(CLASS_ORDER):
+        raise AssertionError(
+            "class.txt 与数据实际类别不一致："
+            f"class.txt 独有 {sorted(set(CLASS_ORDER) - in_data)}；"
+            f"数据独有 {sorted(in_data - set(CLASS_ORDER))}"
+        )
+    print("  class.txt 与数据实际类别完全一致")
+
+    print("=" * 56)
+    print("✅ 自检通过（失败时会以非零退出码结束）")
