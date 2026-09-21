@@ -2,17 +2,22 @@
 # EDA探索性数据分析 - 优化版（9张图）
 # ============================================
 
+import os
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import jieba
 from wordcloud import WordCloud
-import os
 
 # ---------- 配置 ----------
-DATA_PATH = "../data/processed/final_data/train.csv"
-FIG_DIR = "../data/figures/final_data"    # 与数据版本同名，避免和旧数据集的图表混在一起
-STOPWORDS_PATH = "../data/processed/final_data/stopwords.txt"
+# 基于脚本自身位置解析，因此在任何目录下运行都可以
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data", "processed", "final_data")
+
+DATA_PATH = os.path.join(DATA_DIR, "train.csv")
+STOPWORDS_PATH = os.path.join(DATA_DIR, "stopwords.txt")
+FIG_DIR = os.path.join(BASE_DIR, "data", "figures", "final_data")  # 与数据版本同名，避免和旧数据集混在一起
 
 os.makedirs(FIG_DIR, exist_ok=True)
 
@@ -39,7 +44,8 @@ with open(STOPWORDS_PATH, 'r', encoding='utf-8') as f:
 print("\n=== 基础数据统计 ===")
 print(f"总样本数：{len(df)}")
 print(f"缺失值：\n{df.isnull().sum()}")
-print(f"重复评论数：{df.duplicated().sum()} ({df.duplicated().sum()/len(df)*100:.1f}%)")
+n_dup = df.duplicated().sum()
+print(f"重复评论数：{n_dup} ({n_dup/len(df)*100:.1f}%)")
 
 df['review_length'] = df['review'].str.len()
 p99 = df['review_length'].quantile(0.99)
@@ -103,10 +109,10 @@ plt.close()
 # ============================================
 print("图4：评论长度分布...")
 plt.figure(figsize=(9, 5))
+mean_len = df['review_length'].mean()
 plt.hist(df[df['review_length'] <= p99]['review_length'], bins=50, 
          color='#A2DDAA', edgecolor='white')
-plt.axvline(df['review_length'].mean(), color='red', linestyle='--', 
-            label=f'平均：{df["review_length"].mean():.0f}字')
+plt.axvline(mean_len, color='red', linestyle='--', label=f'平均：{mean_len:.0f}字')
 plt.title(f'评论长度分布（显示至P99={p99:.0f}字）', fontsize=13)
 plt.xlabel('评论字数', fontsize=11)
 plt.ylabel('评论数量', fontsize=11)
