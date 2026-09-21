@@ -136,8 +136,15 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
-
 # 工具/编辑器产生的本地目录，不入版本库
 .mimosa/
 .zcode/
 .zcodeignore
+_mine_backup/
+.vscode/
+.workbuddy/
+
+# 大模型权重不入库：Gitee 免费版单文件上限 100MB，LFS 仅企业版开放
+# 这些文件保留在本地磁盘，需要时用网盘/HuggingFace 等另行共享
+models/bert/model/*.pt
+src/rf/model/rf_model*.pkl
