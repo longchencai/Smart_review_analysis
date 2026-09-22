@@ -25,6 +25,7 @@
 #   conda run -p C:\Users\29011\.conda\envs\dl python quantize.py
 # ============================================================
 
+import argparse
 import os
 import time
 import warnings
@@ -74,13 +75,26 @@ def timed_eval(model, loader, device, verbose=False):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--model', default=None,
+                    help='要量化的 fp32 学生权重路径，默认 config.student_model_path')
+    ap.add_argument('--out', default=None,
+                    help='量化模型保存路径，默认 config.quantized_model_path')
+    ap.add_argument('--label', default='量化',
+                    help='结果段落标签，例如 expB，用于区分不同实验产物的量化结果')
+    args = ap.parse_args()
+    if args.model:
+        config.student_model_path = args.model
+    if args.out:
+        config.quantized_model_path = args.out
+
     # torch.ao.quantization 在 2.13 已标记 deprecated（提示迁移到 torchao），
     # 但当前仍是可用且最简的动态量化入口，这里屏蔽噪音警告、保留一个说明。
     warnings.filterwarnings('ignore', category=DeprecationWarning, module=r'torch\.ao\.quantization')
     warnings.filterwarnings('ignore', message=r'.*quantize_per_tensor.*deprecated.*')
 
     print("=" * 68)
-    print("步骤 3：动态量化（int8）")
+    print(f"步骤 3：动态量化（int8）—— {args.label}")
     print("=" * 68)
     torch.backends.quantized.engine = config.quant_engine
     print(f"量化引擎  : {torch.backends.quantized.engine}")
@@ -150,8 +164,9 @@ def main():
     blocks = []
 
     blocks.append(format_metrics_block(
-        3, f"纯蒸馏学生 (SmallBERT {config.student_layers}L/{config.student_hidden}, fp32, CPU)",
-        "量化前基准 —— 与【4】同设备、同代码，差值即为量化代价",
+        f"{args.label}-fp32",
+        f"纯蒸馏学生 [{args.label}] (SmallBERT {config.student_layers}L/{config.student_hidden}, fp32, CPU)",
+        f"量化前基准 —— 与下一条同设备、同代码，差值即为量化代价",
         fp32_metrics, 'cpu',
         param_count=student_params, size_mb=fp32_size,
         model_path=config.student_model_path,
@@ -159,7 +174,8 @@ def main():
                f"({fp32_metrics['_ms_per_sample']:.2f} ms/条, batch={config.eval_batch_size})"]))
 
     blocks.append(format_metrics_block(
-        4, f"蒸馏 + 动态量化学生 (SmallBERT {config.student_layers}L/{config.student_hidden}, int8, CPU)",
+        f"{args.label}-int8",
+        f"蒸馏 + 动态量化学生 [{args.label}] (SmallBERT {config.student_layers}L/{config.student_hidden}, int8, CPU)",
         f"量化产出 —— 引擎={config.quant_engine}, "
         f"范围={'仅Linear' if config.quantize_only_linear else 'Linear + Embedding(float_qparams)'}",
         int8_metrics, 'cpu',

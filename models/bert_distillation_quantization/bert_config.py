@@ -12,7 +12,29 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 _MODEL_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class Config():
+    # ============================================================
+    # 单例：全模块共享同一份配置
+    #
+    # 背景（一次真实踩坑）：本目录每个模块都写 `config = Config()`。
+    # 如果每次调用都产生新实例，那么 distill_train.py 里对开关的修改
+    # （如 distill_use_hidden_loss=True）对 distill_data.py 里那份 config
+    # 不可见，于是出现「dataloader 仍按 5 元组返回、训练循环按 6 元组解包」
+    # 的错位崩溃（实验B 就是这么挂的）。
+    #
+    # 另外单例也让 BERT 权重只加载一次（原本靠类属性 _model_cache 兜底，
+    # 现在连 __init__ 本身也只跑一次，导入更快、更省内存）。
+    # ============================================================
+    _singleton = None
+
+    def __new__(cls):
+        if cls._singleton is None:
+            cls._singleton = super().__new__(cls)
+        return cls._singleton
+
     def __init__(self):
+        if getattr(self, '_initialized', False):
+            return
+        self._initialized = True
         print('正在初始化配置文件....')
         # 各种路径
         # TODO 1.原始数据路径
@@ -87,7 +109,7 @@ class Config():
         # 注意 T^2 只乘在软标签项上：硬标签没经过温度缩放，不能乘
         self.distill_T = 2.0
         self.distill_alpha = 0.7
-        self.distill_epochs = 4
+        self.distill_epochs = 8
         self.distill_batch_size = 32
         # 学生是随机初始化、从零训练的，必须用「预训练级」学习率。
         # 第一版误用了 BERT 微调的 5e-5，实测 3 个 epoch 后损失仍在快速下降、
@@ -101,7 +123,36 @@ class Config():
         self.teacher_soft_label_path = _MODEL_DIR + '/cache/teacher_soft_labels.npz'
         self.cache_batch_size = 64        # 教师只做前向，可以开大
 
-        # 蒸馏产出
+        # ---- 学习率调度（实验 A 引入）----
+        # 基线（第一版）是恒定 lr、只跑 4 轮；实测诊断显示学生严重欠拟合：
+        # 学生训练集 acc 0.9090 < 教师训练集 acc 0.9353，且 train-val 差仅 1.75 点。
+        # 所以主要抓手是「加调度 + 加轮数」，而不是防过拟合。
+        self.distill_warmup_ratio = 0.1   # 前 10% 步数线性 warmup
+        self.distill_schedule = 'cosine'  # 'none' | 'cosine'
+
+        # ---- 逐层 hidden-state 蒸馏（实验 B 引入）----
+        # 动机：输出层蒸馏只监督最后那个 [CLS] 向量，学生中间 4 层全靠反向传播自己摸索；
+        #       TinyBERT 消融显示 hidden-state 损失是贡献最大的单项。
+        # 做法：学生第 1..4 层 ↔ 教师第 3/6/9/12 层（12 层按 3 倍等距抽样），
+        #       用可学习投影 384->768 对齐后做 MSE；投影层只在训练期存在，推理丢弃。
+        # 简化说明：TinyBERT 对整条序列做对齐，但那需要缓存
+        #       43820 x 256 x 768 x 4 层 ≈ 69 GB；本实现只对齐 [CLS] 位置，
+        #       缓存降到约 270 MB。对分类任务而言 [CLS] 正是最终被读的那个位置。
+        self.distill_use_hidden_loss = False
+        self.distill_hidden_weight = 1.0
+        self.teacher_hidden_layer_map = (3, 6, 9, 12)
+        self.teacher_hidden_cache_path = _MODEL_DIR + '/cache/teacher_cls_hidden.npz'
+
+        # ---- 类别加权（实验 C 引入）----
+        # 动机：验证集逐类 F1 显示「家用电器」一类独占大类 macro-F1 损失的 42.5%
+        #       （学生 F1 0.5865 vs 教师 0.7867），而它训练集只有 381 条。
+        # 只作用于硬标签交叉熵；软标签是分布匹配，不加权。
+        self.distill_use_class_weight = False
+        self.distill_class_weight_power = 1.0   # 1.0=逆频率, 0.5=逆平方根
+        self.distill_class_weight_max = 10.0    # 权重上限，防止稀有类梯度过猛
+
+        # 蒸馏产出（student_model_tag 由 distill_train.py 的 --exp 设置，用于区分实验产物）
+        self.student_model_tag = ''
         self.student_model_path = _MODEL_DIR + '/model/student_bert_4l384.pt'
 
         # ============================================================
