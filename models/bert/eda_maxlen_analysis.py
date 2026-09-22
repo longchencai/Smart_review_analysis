@@ -8,17 +8,23 @@ import transformers
 import json
 import os
 
-# ---------- 配置（用绝对路径，避免依赖运行时的 cwd）----------
-BASE = "D:/商品评论智能系统/ai8_-project1"
-DATA_PATH = BASE + "/data/processed/final_data/train.csv"
-OUT_JSON = BASE + "/data/processed/final_data/maxlen_stats.json"
-# 复用原项目已下载好的中文 BERT tokenizer（最准）
-BERT_PATH = "D:/投满分1.0/_04_bert_base/bert-base-chinese"
-# 退路：若本地没有就从 HuggingFace 下
-if not os.path.exists(BERT_PATH + "/config.json"):
+# ---------- 配置 ----------
+# 项目根从本文件位置推算（本文件在 models/bert/ 下，向上三级即项目根）。
+# 既避免依赖运行时的 cwd，也不再写死某台机器的绝对路径。
+BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DATA_PATH = os.path.join(BASE, "data", "processed", "final_data", "train.csv")
+OUT_JSON = os.path.join(BASE, "data", "processed", "final_data", "maxlen_stats.json")
+# 复用已下载好的中文 BERT tokenizer（最准）。按优先级找：
+#   ① 本模块目录 models/bert/bert-base-chinese
+#   ② 蒸馏模块目录（它的 config/tokenizer 已入库，任何机器 clone 后都有）
+#   ③ 都没有才回退到 HuggingFace 仓库 id
+BERT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bert-base-chinese")
+if not os.path.exists(os.path.join(BERT_PATH, "config.json")):
+    BERT_PATH = os.path.join(BASE, "models", "bert_distillation_quantization", "bert-base-chinese")
+if not os.path.exists(os.path.join(BERT_PATH, "config.json")):
     BERT_PATH = "bert-base-chinese"
 
-df = pd.read_csv(DATA_PATH)
+df = pd.read_csv(DATA_PATH, encoding="utf-8-sig")   # 数据 CSV 带 BOM，必须显式指定
 print(f"读入数据：{len(df)} 条")
 
 # ---------- 1. 字符长度分布（作为参考）----------

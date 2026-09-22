@@ -10,6 +10,9 @@ import os
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class Config():
+    # 教师骨架缓存（惰性加载，见下方 bert_model 属性）
+    _teacher_model = None
+
     def __init__(self):
         print('正在初始化配置文件....')
         # 各种路径
@@ -36,11 +39,31 @@ class Config():
         #   ② 原项目已下载好的路径（直接复用，免拷贝、省 C 盘空间）
         #   ③ 都没有才从 HuggingFace 下载
         self.bert_base_chinese_path = self.root_path + 'models/bert-base-chinese'
-        # legacy：原项目已下载的权重（跨项目复用，本机绝对路径）
-        # 其他机器若没有此目录会自动跳过，回退到从 HuggingFace 下载，故无需改成相对路径
-        self.bert_base_chinese_path_legacy = 'D:/投满分1.0/_04_bert_base/bert-base-chinese'
+        # 可选兜底：若本机别处已经有下载好的 bert-base-chinese
+        # （例如另一个项目里下载过，想跨项目复用、省一次下载），
+        # 可以用环境变量 BERT_BASE_CHINESE_DIR 把目录指过来。
+        # 原来这里直接写死了另一台机器上的绝对路径 —— 换机器虽然会被下面的
+        # os.path.exists 跳过，但写死在代码里既误导别人又完全不可移植，改为环境变量注入。
+        self.bert_base_chinese_path_legacy = os.environ.get('BERT_BASE_CHINESE_DIR', '')
+        # 第三个候选：蒸馏模块目录下自带的 bert-base-chinese。
+        # 它的 config.json / tokenizer.json / vocab.txt 都是**入库文件**（任何机器 clone 后都有），
+        # 于是即使一个权重都没下载，教师模块也能拿到 tokenizer 和 config，
+        # 「读数据 / 分词」这类不需要教师模型的用法可以直接跑起来。
+        # 教师骨架本身（390 MB 权重）仍需单独获取，且只有真正访问 bert_model 时才会用到。
+        #
+        # ⚠️ 迁移提醒：这里只放**数据目录**，不 import 蒸馏模块的任何代码。
+        #   如果你的机器上原本有一份带权重的 bert-base-chinese（旧版是写死在代码里的），
+        #   现在需要显式用环境变量 BERT_BASE_CHINESE_DIR 指过去 —— 否则会优先命中
+        #   下面这个 sibling 目录（它没有权重），教师模型反而加载不了。
+        #   优先级：models/bert-base-chinese > $BERT_BASE_CHINESE_DIR > sibling > HuggingFace
+        self.bert_base_chinese_path_sibling = (
+            self.root_path + 'models/bert_distillation_quantization/bert-base-chinese')
         os.makedirs(self.root_path + 'models/', exist_ok=True)
-        model_candidates = [self.bert_base_chinese_path, self.bert_base_chinese_path_legacy, 'bert-base-chinese']
+        # 过滤掉空值：legacy 未用环境变量指定时是空串
+        model_candidates = [c for c in (self.bert_base_chinese_path,
+                                        self.bert_base_chinese_path_legacy,
+                                        self.bert_base_chinese_path_sibling,
+                                        'bert-base-chinese') if c]
         model_path = None
         for cand in model_candidates:
             if os.path.exists(cand + '/config.json'):
@@ -49,20 +72,27 @@ class Config():
         if model_path is None:
             model_path = 'bert-base-chinese'
         print(f"使用 BERT 模型路径: {model_path}")
-        # 提前加载 tokenizer 和 bert 模型对象
+        # 加载 tokenizer 和 BertConfig。
+        # 这两个都很轻（几百 KB）且推理/数据处理路径本来就要用，直接在这里加载。
         # 加缓存：多个 Config() 实例（eval_utils / dataloader_utils / eval 脚本各自顶层都建了 Config）
         # 只会真正 from_pretrained 一次，避免重复加载把内存打爆导致 Rust tokenizer 报
         # "memory allocation of 2097152 bytes failed"
+        #
+        # 注意：教师骨架 BertModel（≈390 MB）**不在这里加载**，改为惰性属性 bert_model。
+        # 原因：本模块的 Config() 是在每个脚本顶层就创建的，一旦在此处 eager 加载，
+        #       「基座权重缺失」会让所有脚本（包括只用 tokenizer / 只用 dataloader 的）
+        #       在 import 阶段就直接失败。改为惰性后，只有真正需要教师模型的地方才会加载。
         if not hasattr(Config, '_model_cache'):
             Config._model_cache = {}
         if model_path not in Config._model_cache:
-            print(f"首次加载 BERT 权重(已缓存复用): {model_path}")
+            print(f"首次加载 BERT tokenizer/config(已缓存复用): {model_path}")
             Config._model_cache[model_path] = (
                 transformers.BertTokenizer.from_pretrained(model_path),
-                transformers.BertModel.from_pretrained(model_path),
                 transformers.BertConfig.from_pretrained(model_path),
             )
-        self.bert_tokenizer, self.bert_model, self.bert_config = Config._model_cache[model_path]
+        self.bert_tokenizer, self.bert_config = Config._model_cache[model_path]
+        # 记下基座目录，供 bert_model 属性惰性加载时使用
+        self._bert_base_path = model_path
         # 多任务 BERT 模型保存路径
         # 多任务 BERT 模型权重：与远程 models/fasttext/model/ 对齐，统一放在 models/bert/model/ 下
         self.bert_classifier_model_save_path = self.root_path + 'models/bert/model/bert_multitask_classifier_model.pt'
@@ -90,6 +120,60 @@ class Config():
         self.sent2id = {'负面评价': 0, '正面评价': 1}
 
         print('配置文件初始化动作完成!')
+
+    # ============================================================
+    # 教师骨架：惰性加载（用到才加载）
+    #
+    # 与本项目蒸馏模块（models/bert_distillation_quantization/bert_config.py）保持同一模式。
+    #
+    # 为什么不在 __init__ 里直接加载？
+    #   本模块的 Config() 是在每个脚本顶层就创建的（dataloader_utils / bert_model_eval_utils /
+    #   bert_classifier_model 等都是 `config = Config()`）。若在此 eager 加载 390 MB 的骨架，
+    #   那么「基座权重缺失」会让这些脚本在 **import 阶段**就整体失败 ——
+    #   哪怕只是想用 load_data_list() 读一下 csv、或只想拿 tokenizer，也会被一起打挂。
+    #
+    # 改成属性后：
+    #   · 只读数据 / 只取 tokenizer 的用法完全不再依赖这 390 MB
+    #   · 真正需要教师处（bert_classifier_model / bert_train / bert_eval_on_test /
+    #     bert_predict_fun）在访问 config.bert_model 时才加载，并给出可读的报错
+    # ============================================================
+    @property
+    def bert_model(self):
+        if Config._teacher_model is None:
+            path = getattr(self, '_bert_base_path', None)
+            if not path:
+                raise RuntimeError(
+                    "Config 尚未初始化完成，无法定位基座权重路径；请先正常实例化 Config()")
+            print(f"首次加载 BERT 教师骨架(惰性): {path}")
+            try:
+                Config._teacher_model = transformers.BertModel.from_pretrained(path)
+            except OSError as e:
+                # 分两种情形给不同的排查方向，避免把「联网失败」误报成「本地缺文件」。
+                # （注意 requests 的 ProxyError / ConnectionError 也是 OSError 的子类，
+                #   所以不能笼统地说成"目录下缺权重"。）
+                if os.path.isdir(path):
+                    reason = (
+                        "基座权重文件缺失：该目录下没有 pytorch_model.bin / model.safetensors。\n"
+                        f"  目录    : {path}\n"
+                        "  获取方式: ① 运行 python docs/model_audit/fetch_base.py 自动下载\n"
+                        "            ② 再用环境变量 BERT_BASE_CHINESE_DIR 指向下载目录，"
+                        "或把权重文件直接放到上面的目录"
+                    )
+                else:
+                    reason = (
+                        "基座模型目录不存在，且未能从 HuggingFace 加载（可能是网络问题）。\n"
+                        f"  期望目录: {path}\n"
+                        "  建议    : 把 bert-base-chinese 放到该目录，"
+                        "或用环境变量 BERT_BASE_CHINESE_DIR 指向已有目录"
+                    )
+                raise OSError(
+                    "教师模型骨架加载失败。\n"
+                    f"  {reason}\n"
+                    "  提示    : 只读数据或只取 tokenizer 的用法不需要这个文件，"
+                    "只有加载教师模型时才需要。\n"
+                    f"  原始错误: {e}"
+                ) from e
+        return Config._teacher_model
 
 
 if __name__ == '__main__':

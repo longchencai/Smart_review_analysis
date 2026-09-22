@@ -17,7 +17,10 @@ def load_data_list(csv_path):
     # 提前创建一个列表, 用于存储 (评论, 情感标签, 商品大类标签) 元组
     data_list = []
     # 读取 csv
-    df = pd.read_csv(csv_path)
+    # 显式指定 utf-8-sig：数据 CSV 由清洗脚本以 utf-8-sig 落盘（带 BOM），
+    # 不指定的话部分 pandas 版本会把首列名读成 '\ufeffreview'，
+    # 随后 row['review'] 抛 KeyError，且报错信息很难指向真正原因。
+    df = pd.read_csv(csv_path, encoding='utf-8-sig')
     # 遍历每一行
     for _, row in df.iterrows():
         text = str(row['review'])

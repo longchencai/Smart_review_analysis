@@ -10,8 +10,9 @@ import json
 import os
 from typesafe_sdk import Choice, Noul, TypeSafeClient
 
-BASE = "D:/商品评论智能系统/ai8_-project1"
-STATS_JSON = BASE + "/data/processed/final_data/maxlen_stats.json"
+# 项目根从本文件位置推算（本文件在 models/bert/ 下，向上三级即项目根）
+BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+STATS_JSON = os.path.join(BASE, "data", "processed", "final_data", "maxlen_stats.json")
 
 # 读取之前 eda_maxlen_analysis.py 算好的统计（包含给模型看的 stats_text）
 with open(STATS_JSON, "r", encoding="utf-8") as f:

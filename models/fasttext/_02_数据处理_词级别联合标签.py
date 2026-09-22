@@ -16,7 +16,8 @@ def process_data(base_path, process_path):
         c开头 = 商品大类(一级大类)，s开头 = 情感(0负面/1正面)
     """
     # 读取csv（列：review, label, cat_l1, cat_l2）
-    df = pd.read_csv(base_path)
+    # 显式指定 utf-8-sig：数据 CSV 带 BOM，不指定会把首列名读成 '\ufeffreview'
+    df = pd.read_csv(base_path, encoding='utf-8-sig')
     with open(process_path, 'w', encoding='utf8') as fw:
         for text, cat, label in zip(df['review'], df['cat_l1'], df['label']):
             # 1.先去掉换行和制表符，避免一行的数据被拆成两行

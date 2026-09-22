@@ -25,6 +25,8 @@ class Config():
     # 现在连 __init__ 本身也只跑一次，导入更快、更省内存）。
     # ============================================================
     _singleton = None
+    # 教师骨架缓存（惰性加载，见下方 bert_model 属性）
+    _teacher_model = None
 
     def __new__(cls):
         if cls._singleton is None:
@@ -74,20 +76,24 @@ class Config():
         if model_path is None:
             model_path = 'bert-base-chinese'
         print(f"使用 BERT 模型路径: {model_path}")
-        # 提前加载 tokenizer 和 bert 模型对象
+        # 加载 tokenizer 和 BertConfig。
+        # 这两个都很轻（几百 KB）且推理路径本来就要用，直接在这里加载。
         # 加缓存：多个 Config() 实例（eval_utils / dataloader_utils / eval 脚本各自顶层都建了 Config）
         # 只会真正 from_pretrained 一次，避免重复加载把内存打爆导致 Rust tokenizer 报
         # "memory allocation of 2097152 bytes failed"
+        #
+        # 注意：教师骨架 BertModel（≈390 MB）**不在这里加载**，改为惰性属性 bert_model，原因见该属性注释。
         if not hasattr(Config, '_model_cache'):
             Config._model_cache = {}
         if model_path not in Config._model_cache:
-            print(f"首次加载 BERT 权重(已缓存复用): {model_path}")
+            print(f"首次加载 BERT tokenizer/config(已缓存复用): {model_path}")
             Config._model_cache[model_path] = (
                 transformers.BertTokenizer.from_pretrained(model_path),
-                transformers.BertModel.from_pretrained(model_path),
                 transformers.BertConfig.from_pretrained(model_path),
             )
-        self.bert_tokenizer, self.bert_model, self.bert_config = Config._model_cache[model_path]
+        self.bert_tokenizer, self.bert_config = Config._model_cache[model_path]
+        # 记下基座目录，供 bert_model 属性惰性加载时使用
+        self._bert_base_path = model_path
         # 多任务 BERT 模型保存路径
         # 本模块训练出的权重，统一放在 models/bert_distillation_quantization/model/ 下
         self.bert_classifier_model_save_path = _MODEL_DIR + '/model/bert_multitask_classifier_model.pt'
@@ -199,6 +205,59 @@ class Config():
         self.sent2id = {'负面评价': 0, '正面评价': 1}
 
         print('配置文件初始化动作完成!')
+
+    # ============================================================
+    # 教师骨架：惰性加载（用到才加载）
+    #
+    # 为什么不在 __init__ 里直接加载？
+    #   1) 推理路径（predict.py / test_predict.py / quantize.py）只加载学生权重，
+    #      **完全不需要**这个 ≈390 MB 的教师骨架，却要为它承担
+    #      「基座权重文件缺失 → 整个模块启动不了」的风险。
+    #   2) 该文件被 .gitignore 排除（models/**/bert-base-chinese/*.safetensors），
+    #      任何一次 git clean -x / 全目录 checkout 都可能把它清掉。实测已被清掉过两次，
+    #      每次都会把所有脚本（连纯推理）一起打挂。
+    #
+    # 改成属性后：
+    #   · 不需要教师的地方（推理 / 量化 / 预测器测试）完全不再碰这 390 MB
+    #   · 真正需要教师的地方（bert_classifier_model / cache_teacher_logits /
+    #     distill_train --teacher-ref / bert_eval_on_test）在访问时才加载，
+    #     并且会拿到一条说明清楚的报错，而不是一串难懂的 OSError
+    # ============================================================
+    @property
+    def bert_model(self):
+        if Config._teacher_model is None:
+            path = getattr(self, '_bert_base_path', None)
+            if not path:
+                raise RuntimeError(
+                    "Config 尚未初始化完成，无法定位基座权重路径；请先正常实例化 Config()")
+            print(f"首次加载 BERT 教师骨架(惰性): {path}")
+            try:
+                Config._teacher_model = transformers.BertModel.from_pretrained(path)
+            except OSError as e:
+                # 分两种情形给不同的排查方向，避免把「联网失败」误报成「本地缺文件」。
+                # （注意 requests 的 ProxyError / ConnectionError 也是 OSError 的子类，
+                #   所以不能笼统地说成"目录下缺权重"。）
+                if os.path.isdir(path):
+                    reason = (
+                        "基座权重文件缺失：该目录下没有 pytorch_model.bin / model.safetensors。\n"
+                        f"  目录    : {path}\n"
+                        "  获取方式: 运行 python docs/model_audit/fetch_base.py（自动从镜像下载）"
+                    )
+                else:
+                    reason = (
+                        "基座模型目录不存在，且未能从 HuggingFace 加载（可能是网络问题）。\n"
+                        f"  期望目录: {path}\n"
+                        "  建议    : 把 bert-base-chinese 放到该目录，"
+                        "或用环境变量 BERT_BASE_CHINESE_DIR 指向已有目录"
+                    )
+                raise OSError(
+                    "教师模型骨架加载失败。\n"
+                    f"  {reason}\n"
+                    "  提示    : 学生模型的推理与量化（predict.py / test_predict.py / "
+                    "quantize.py）不需要这个文件，只有教师相关脚本才需要。\n"
+                    f"  原始错误: {e}"
+                ) from e
+        return Config._teacher_model
 
 
 if __name__ == '__main__':

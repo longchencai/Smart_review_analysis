@@ -6,8 +6,11 @@
 <meta name="theme-color" content="#f5f5f7">
 <title>智能评论分析 · Smart Review Analytics</title>
 
-<!-- Tailwind CSS（工具类，负责布局与间距） -->
-<script src="https://cdn.tailwindcss.com"></script>
+<!-- 内联图标：不依赖外部文件，file:// 直接双击打开时也不会报 404 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a84ff'/%3E%3Cpath d='M8 21.5V13a8 8 0 0 1 16 0v8.5' stroke='%23fff' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='8' cy='23' r='2.6' fill='%23fff'/%3E%3Ccircle cx='24' cy='23' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
+
+  <!-- Tailwind CSS（工具类，负责布局与间距） -->
+  <script src="https://cdn.tailwindcss.com"></script>
 <!-- ECharts（图表） -->
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 
@@ -932,6 +935,7 @@ body{
           <div style="margin-top:26px">
             <p class="card-note" style="margin-bottom:10px">服务地址（对接真实模型）</p>
             <input class="field" id="apiField" value="http://127.0.0.1:8000/predict" spellcheck="false">
+            <div id="apiStatus" class="tag tag-neg" style="margin-top:10px">未连接后端 · 本地模拟</div>
           </div>
         </div>
 
@@ -1085,13 +1089,51 @@ function fmt(n, d){
 }
 
 /* ==========================================================================
-   响应耗时：计量与呈现
+   真实模型 / 本地模拟 的自动切换
    --------------------------------------------------------------------------
-   当前 DEMO_MODE = true，分析在浏览器本地模拟完成，所以「计算」这一段是
-   本地 JS 耗时，不是真实模型耗时。接入真实模型（见 runClassify 末尾注释）后
-   把 DEMO_MODE 改成 false，该数字就是真实的端到端耗时，无需改其他地方。
+   · 页面由后端托管时（server/app.py，http://<局域网IP>:8000/）：
+     启动时探测 /api/health，通了就把 DEMO_MODE 切成 false，走真实模型。
+   · 直接双击文件打开时（file://）：保持 true，用本地模拟，保证离线也能演示。
+   两种情况都不需要手动改代码 —— 之前需要手改 DEMO_MODE，忘了就会误以为
+   页面上显示的是真实模型耗时。
    ========================================================================== */
-const DEMO_MODE = true;
+let DEMO_MODE = true;
+
+/* 相对路径：页面与接口同源部署时天然可用；跨源打开时退回 apiField 里填的地址 */
+function apiUrl(path){
+  if (/^https?:$/.test(location.protocol)) return 'api/' + path;
+  const f = document.getElementById('apiField');
+  const base = (f && f.value) ? f.value.replace(/\/[^/]*$/, '') : 'http://127.0.0.1:8000';
+  return base + '/api/' + path;
+}
+
+/* 探测完成后把结论写回页面，避免「以为在看真实模型、其实看的是模拟」 */
+function setApiStatus(connected, label){
+  const el = document.getElementById('apiStatus');
+  if (!el) return;
+  el.className = 'tag' + (connected ? ' tag-blue' : ' tag-neg');
+  el.textContent = label;
+}
+
+/* 后台探测一次；成功即切到真实模型模式 */
+async function detectBackend(){
+  if (!/^https?:$/.test(location.protocol)) return;   // file:// 直接保持模拟
+  try{
+    const res = await fetch(apiUrl('health'), { cache: 'no-store' });
+    const j = await res.json();
+    if (res.ok && j.ok){
+      DEMO_MODE = false;
+      setApiStatus(true, '已连接真实模型 · ' + (j.mode || ''));
+      console.log('[predict] 已连接后端，使用真实模型:', j.mode);
+    } else {
+      setApiStatus(false, '后端不可用 · 本地模拟');
+      console.warn('[predict] 后端不可用，退回本地模拟:', j.reason || res.status);
+    }
+  } catch (e){
+    setApiStatus(false, '未连接后端 · 本地模拟');
+    console.warn('[predict] 探测后端失败，退回本地模拟:', e.message);
+  }
+}
 
 /* 真实蒸馏模型的实测基准（CPU，batch=64，全量验证集 9390 条，取 3 次最小值）。
    放在这里是为了让页面上的耗时有个可对照的锚点，而不是孤零零一个数字。 */
@@ -1511,7 +1553,7 @@ function simulatePredict(text){
   const exact = MODEL_SAMPLES.find(s => s.text === text.trim());
   if (exact){
     return buildResult(text, exact.cat, exact.catId, exact.catConf,
-                              exact.sent, exact.sentId, exact.sentConf, true);
+                              exact.sent, exact.sentId, exact.sentConf, 'sample');
   }
 
   /* ② 关键词打分 */
@@ -1541,11 +1583,11 @@ function simulatePredict(text){
   const sentConf = Math.min(0.9988, 0.62 + Math.min(0.34, margin * 0.05) + j2 * 0.02);
 
   return buildResult(text, best.name, catId, catConf,
-                           SENTIMENTS[sentId], sentId, sentConf, false);
+                           SENTIMENTS[sentId], sentId, sentConf, 'sim');
 }
 
 /* 组装成与 predict.py 完全一致的返回结构 */
-function buildResult(text, cat, catId, catConf, sent, sentId, sentConf, isMeasured){
+function buildResult(text, cat, catId, catConf, sent, sentId, sentConf, source){
   /* 其余类别的概率：按打分占比分配，无命中则均匀分配 */
   const scores = CATEGORIES.map(c => ({ name: c, s: hitScore(text, CAT_KEYWORDS[c]) }));
   const totalS = scores.reduce((n, x) => n + x.s, 0);
@@ -1581,7 +1623,8 @@ function buildResult(text, cat, catId, catConf, sent, sentId, sentConf, isMeasur
     ],
     token_length: tokenLength,
     truncated: tokenLength > MAX_LEN,
-    _measured: isMeasured          // 标记该结果是否来自真实模型实测
+    /* 结果来源：'sample' 内置真实样例 / 'server' 服务端真实模型 / 'sim' 前端模拟 */
+    _source: source
   };
 }
 
@@ -1590,6 +1633,13 @@ function renderResult(r){
   const isPos = r.sentiment_id === 1;
   const bar = (v, cls) => `
     <div class="bar ${cls}"><i style="width:${(v * 100).toFixed(1)}%"></i></div>`;
+
+  /* 来源徽标：三种来源要区分清楚，别让人以为模拟结果也是模型输出 */
+  const SOURCE_TAG = {
+    sample: '<span class="tag tag-blue">真实模型实测值</span>',
+    server: '<span class="tag tag-blue">服务端真实模型</span>',
+    sim:    '<span class="tag">前端模拟结果</span>'
+  }[r._source] || '<span class="tag">未知来源</span>';
 
   /* 产出给后端/前端联调用的标准 JSON（与 predict.py 一致） */
   const payload = {
@@ -1603,9 +1653,7 @@ function renderResult(r){
     <div class="card fade-in">
       <div style="display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:26px">
         <h3 class="card-title" style="flex:1 1 auto">分析结果</h3>
-        ${r._measured
-          ? '<span class="tag tag-blue">真实模型实测值</span>'
-          : '<span class="tag">前端模拟结果</span>'}
+        ${SOURCE_TAG}
         ${r.truncated
           ? `<span class="tag tag-neg">已截断 · ${r.token_length} tokens</span>`
           : `<span class="tag">${r.token_length} tokens</span>`}
@@ -1673,7 +1721,7 @@ function renderResult(r){
             <span class="tv" id="tPre">—</span>
           </div>
           <div class="timing-row">
-            <span class="tn">计算　　模型推理${DEMO_MODE ? '（前端模拟）' : ''}</span>
+            <span class="tn">计算　　模型推理${r._source === 'sim' ? '（前端模拟）' : '（服务端真实模型）'}</span>
             <span class="tv" id="tInfer">—</span>
           </div>
           <div class="timing-row">
@@ -1687,6 +1735,10 @@ function renderResult(r){
           终点为结果完成绘制（<code>requestAnimationFrame</code> 回调）的时刻。
           单位 <code>ms</code>，<code>≥1000 ms</code> 自动换算为 <code>s</code>（保留 2 位小数）。
           三段之和恒等于上方总耗时。
+          ${r._source === 'server'
+            ? '<br><b>注意</b>：本次「计算」包含浏览器→服务器→浏览器的网络往返，'
+              + '所以会比模型本身耗时略高（模型单独实测见下方对照）。'
+            : ''}
           <br>
           <b>对照</b>：${MODEL_BASELINE}
         </p>
@@ -1735,7 +1787,7 @@ function renderEmptyState(){
 }
 
 /* ---- 分类交互 ---- */
-function runClassify(){
+async function runClassify(){
   const t0 = performance.now();                 // 计时起点：点击「开始分析」的瞬间
 
   const input = document.getElementById('classifyInput');
@@ -1756,8 +1808,33 @@ function runClassify(){
   const prepared = text.replace(/\s+/g, ' ');
   const t1 = performance.now();
 
-  /* ---- ② 计算：本地模拟推理 ---- */
-  const r = simulatePredict(prepared);
+  /* ---- ② 计算 ----
+     DEMO_MODE = false 时走服务端真实模型（server/app.py 的 /api/predict）；
+     否则用本地关键词模拟。后端调用失败会自动降级为模拟，不让整个流程断掉。 */
+  let r;
+  if (DEMO_MODE){
+    r = simulatePredict(prepared);
+  } else {
+    try{
+      const res = await fetch(apiUrl('predict'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texts: [prepared], top_k: 3 })
+      });
+      if (!res.ok){
+        const detail = (await res.text()).slice(0, 300);
+        throw new Error(`HTTP ${res.status} · ${detail}`);
+      }
+      r = await res.json();
+      if (Array.isArray(r)) r = r[0];
+      r._source = 'server';
+    } catch (e){
+      r = simulatePredict(prepared);
+      r._source = 'sim';
+      toast('后端调用失败，已降级为本地模拟');
+      console.error('[predict] 后端调用失败：', e);
+    }
+  }
   const t2 = performance.now();
 
   /* ---- ③ 渲染：写入 DOM，再按「完成绘制」精修 ---- */
@@ -1779,18 +1856,8 @@ function runClassify(){
   btn.disabled = false;
   btn.textContent = '开始分析';
 
-  /* --------------------------------------------------------------
-     切换到真实模型：把 ② 那段替换成下面的 fetch 即可。
-     届时把顶部的 DEMO_MODE 改成 false，「计算」这一段就是真实端到端耗时。
-
-     const t2 = performance.now();
-     const res  = await fetch(document.getElementById('apiField').value, {
-       method: 'POST',
-       headers: { 'Content-Type': 'application/json' },
-       body: JSON.stringify({ texts: [prepared] })
-     });
-     const r = (await res.json())[0];
-     -------------------------------------------------------------- */
+  /* 真实模型 / 本地模拟 的切换由 detectBackend() 在页面加载时自动完成，
+     不需要手改代码。后端见 server/app.py。 */
 }
 
 /* 把三段耗时写进结果卡，并更新会话统计
@@ -1905,6 +1972,10 @@ function closeDrawer(){
    7. 初始化
    ========================================================================== */
 document.addEventListener('DOMContentLoaded', () => {
+
+  /* 探测后端是否可用，可用则自动切到真实模型（见 detectBackend 定义处）。
+     放在最前面发起，但不 await —— 它是网络请求，不能阻塞首屏渲染。 */
+  detectBackend();
 
   /* 渲染静态内容 */
   renderLatest();
