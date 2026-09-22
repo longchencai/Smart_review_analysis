@@ -2,6 +2,7 @@
 """学生模型在 test 集上的评估（本模块从未做过这件事）。
 与项目评估口径一致：固定 padding 到 256，batch=64，macro-F1。
 """
+import os
 import warnings
 
 import numpy as np
@@ -15,9 +16,11 @@ from torch.ao.quantization import (default_dynamic_qconfig, float_qparams_weight
 warnings.filterwarnings("ignore")
 torch.backends.quantized.engine = "onednn"
 
-ROOT = r"D:\DEVELOP\Project\ai8_-project1"
-MOD = ROOT + r"\models\bert_distillation_quantization"
-DATA = ROOT + r"\data\processed\final_data"
+# 路径从脚本自身位置推算：本文件在 <项目根>/docs/model_audit/ 下，向上三级即项目根。
+# 这样换机器、换 clone 目录都能直接跑，不需要改任何路径。
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MOD = os.path.join(ROOT, "models", "bert_distillation_quantization")
+DATA = os.path.join(ROOT, "data", "processed", "final_data")
 
 
 class StudentModel(torch.nn.Module):

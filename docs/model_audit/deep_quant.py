@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """量化误差深挖：逐层反量化 vs fp32，定位精度损失来源与 embedding 异常行。"""
+import os
 import warnings
 
 import numpy as np
@@ -7,7 +8,11 @@ import torch
 
 warnings.filterwarnings("ignore")
 
-ROOT = r"D:\DEVELOP\Project\ai8_-project1\models\bert_distillation_quantization\model"
+# 路径从脚本自身位置推算：本文件在 <项目根>/docs/model_audit/ 下，向上三级即项目根。
+# 这样换机器、换 clone 目录都能直接跑，不需要改任何路径。
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_MODEL_DIR = os.path.join(_PROJECT_ROOT, "models", "bert_distillation_quantization")
+ROOT = os.path.join(_MODEL_DIR, "model")
 fp32 = torch.load(f"{ROOT}/student_bert_4l384.pt", map_location="cpu", weights_only=True)
 qs = torch.load(f"{ROOT}/student_bert_4l384_int8.pt", map_location="cpu", weights_only=True)
 
@@ -93,7 +98,7 @@ if zeroed.any():
     print(f"    这些行 fp32 最大绝对值 中位={row_range32[zidx].median():.3e} 最大={row_range32[zidx].max():.3e}")
 
 # 用词表看这些行是什么 token
-vocab = open(r"D:\DEVELOP\Project\ai8_-project1\models\bert_distillation_quantization\bert-base-chinese\vocab.txt",
+vocab = open(os.path.join(_MODEL_DIR, "bert-base-chinese", "vocab.txt"),
              encoding="utf-8").read().splitlines()
 print(f"\n  词表大小: {len(vocab)}  (嵌入行数 {emb32.shape[0]})")
 zs = zeroed.nonzero().flatten().tolist()
@@ -127,16 +132,12 @@ for k, v in qs.items():
     if not torch.is_tensor(v):
         continue
     if "word_embeddings" in k:
-        bucket["Embedding", 0]
         bucket["Embedding"] = bucket.get("Embedding", 0) + nbytes(v)
     elif "position_embeddings" in k or "token_type_embeddings" in k:
-        bucket["Embedding(位置/类型)", 0]
         bucket["Embedding(位置/类型)"] = bucket.get("Embedding(位置/类型)", 0) + nbytes(v)
     elif "LayerNorm" in k:
-        bucket["LayerNorm(未量化)", 0]
         bucket["LayerNorm(未量化)"] = bucket.get("LayerNorm(未量化)", 0) + nbytes(v)
     else:
-        bucket["量化标量/其他", 0]
         bucket["量化标量/其他"] = bucket.get("量化标量/其他", 0) + nbytes(v)
 tot = sum(bucket.values())
 for k, b in sorted(bucket.items(), key=lambda x: -x[1]):

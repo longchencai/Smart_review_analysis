@@ -4,7 +4,10 @@ import os
 import sys
 import traceback
 
-os.chdir(r"D:\DEVELOP\Project\ai8_-project1\models\bert_distillation_quantization")
+# 路径从脚本自身位置推算：本文件在 <项目根>/docs/model_audit/ 下，向上三级即项目根。
+# 这样换机器、换 clone 目录都能直接跑，不需要改任何路径。
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.chdir(os.path.join(_PROJECT_ROOT, "models", "bert_distillation_quantization"))
 sys.path.insert(0, os.getcwd())
 
 print(f"cwd = {os.getcwd()}")
