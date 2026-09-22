@@ -19,6 +19,9 @@
 - **端到端压缩 390.22 MB → 15.11 MB = 25.8×**（蒸馏 6.57× × 量化 3.93×）
 - 量化后 CPU 推理 25.94 → **18.55 ms/条（1.40× 加速）**
 
+> **只想要「输入一条评价 → 输出类别 + 情感」？** 直接跳到第十一节「预测入口」，
+> 用 `predict.py` 的 `StudentPredictor`，三行代码即可接入后端。
+
 ### 三组实验的增量（每组只比上一组多一个变量）
 
 | 实验 | 改动 | 综合 F1 | Δ | 结论 |
@@ -41,6 +44,8 @@ models/bert_distillation_quantization/
 ├── distill_train.py             【新】步骤 2：蒸馏训练，--exp A|B|C 切换三组实验
 ├── quantize.py                  【新】步骤 3：动态量化 + 量化后评估 + 加载自检
 ├── summarize_results.py         【新】解析 eval_result.txt 生成横向对比表
+├── predict.py                   【新】★ 预测入口 StudentPredictor，供后端直接接入（见第十一节）
+├── test_predict.py              【新】预测器测试（31 项，含端到端一致性校验）
 ├── report_utils.py              【新】评估与结果落盘，统一报告格式
 ├── bert_model_eval_utils.py     【改】修复 device 处理（量化评估必需）+ 静默模式
 ├── dataloader_utils.py          【改】支持自定义 batch_size、显式 utf-8-sig
@@ -367,6 +372,8 @@ README 早前版本曾把它列为第一优先级，**基于实测诊断已下�
 | 11 | **解析自己的报告时用 `split('【')`** | 段落副标题里也会出现 `【0】`、`【量化】` 这类引用，会把块从中间截断、静默丢掉整段。`summarize_results.py` 改成按**行首**的 `【` 切分（`re.split(r'\n(?=【)')`）|
 | 12 | **PowerShell 5.1 的 `-Encoding utf8` 会写 BOM** | 导致 git 提交信息标题混入不可见 `U+FEFF`（`git log --format=%s` 首字符码点 0xFEFF）。改用 `[System.IO.File]::WriteAllText` + `UTF8Encoding($false)`，并用 `--amend` 修正 |
 | 13 | **给后台脚本传参拼成单个字符串** | `& $py "$dir\x.py --force"` 被当成文件名 → `can't open file '...x.py --force'`。必须传数组 `@("$dir\x.py","--force")` |
+| 14 | **量化模型上直接 `sum(model.parameters())` 数参数量** | 量化后 `nn.Linear`/`nn.Embedding` 不再是 `nn.Parameter`，实测只数到 **6,912**（真实 15,560,457）。`predict.py` 改为按 fp32 架构统计（`architectural_param_count()`）|
+| 15 | **`predict_batch` 不分块** | 把整批一次性 tokenize + 前向，服务端收到上千条就会构造 (N, 256) 张量并 OOM。已改为按 `batch_size`（默认 64）内部自动分块 |
 
 ---
 
@@ -377,3 +384,102 @@ README 早前版本曾把它列为第一优先级，**基于实测诊断已下�
 - **量化服务于无 GPU 的场景**：体积 −74.5%、CPU 提速 1.40×。若部署机器有 GPU，应直接用 fp32 学生（GPU 上更快）。
 - 重新训练后 `distill_train.py --exp A --reset` 会**清空并重建** `eval_result.txt`，B/C 与 `quantize.py`、`summarize_results.py` 只**追加**，因此重跑不会累积历史垃圾段落。
 - `cache/eval_result_baseline_backup.txt` 保留了修正前那一版的结果，`summarize_results.py` 会读它作为「基线」一行。
+
+---
+
+## 十一、预测入口（供后端接入）
+
+`predict.py` 提供框架无关的 `StudentPredictor`：**输入一条评价文本 → 输出商品大类 + 情感**，
+并附带置信度与候选类别。它不依赖任何 Web 框架，FastAPI / Flask / Django 都能直接调用。
+
+### 11.1 三行接入
+
+```python
+from predict import get_predictor
+
+predictor = get_predictor(quantized=True)          # 进程内单例，建议在服务启动时预热一次
+result = predictor.predict("这个键盘手感很好，就是有点贵")
+# {'text': '...', 'category': '数码电子', 'category_id': 3, 'category_confidence': 0.9982,
+#  'sentiment': '正面评价', 'sentiment_id': 1, 'sentiment_confidence': 0.9481}
+```
+
+### 11.2 接口一览
+
+| 方法 | 说明 |
+|---|---|
+| `StudentPredictor(quantized=True, device=None, model_path=None, top_k=0, batch_size=64)` | 构造。`quantized=True` 用 15 MB 的 int8 权重（强制 CPU）；`False` 用 59 MB 的 fp32 权重 |
+| `.load()` | 显式加载，幂等。不调也行，首次预测会自动加载 |
+| `.predict(text, top_k=None, with_truncation=False)` | 单条预测，返回 dict |
+| `.predict_batch(texts, top_k=None, with_truncation=False, batch_size=None)` | 批量预测，**内部自动分块**，比逐条快得多 |
+| `.info()` | 模型元信息（路径/精度/设备/参数量/类别表/加载耗时），适合做健康检查 |
+| `get_predictor(...)` | 进程内单例，避免每个请求重复加载 |
+| `predict(text, ...)` | 模块级便捷函数 |
+
+返回字段：
+
+```python
+{
+  "text": "...",                    # 原始输入
+  "category": "数码电子",            # 商品大类（7 类之一）
+  "category_id": 3,
+  "category_confidence": 0.9982,    # softmax 概率
+  "sentiment": "正面评价",           # 情感（正/负）
+  "sentiment_id": 1,
+  "sentiment_confidence": 0.9481,
+  "top_categories": [...],          # 传 top_k>0 时返回，按概率降序
+  "token_length": 23,               # 传 with_truncation=True 时返回
+  "truncated": False,               # 同上；>256 token 会被截断
+}
+```
+
+### 11.3 选 int8 还是 fp32
+
+| | int8（默认）| fp32 |
+|---|---|---|
+| 模型体积 | **15.12 MB** | 59.39 MB |
+| 设备 | **只能 CPU** | GPU / CPU |
+| 吞吐（batch=64） | 19.2 ms/条 | **1.4 ms/条（GPU）** |
+| 精度 | 综合 F1 0.9074 | 综合 F1 0.9072 |
+
+**选型原则**：部署机器**没有 GPU** → int8（这也是量化的本意：换 CPU 成本，不是变快）；
+**有 GPU** → fp32，GPU 上快 13 倍。
+
+### 11.4 接后端时的注意事项
+
+| 事项 | 说明 |
+|---|---|
+| **量化模型只能 CPU** | `quantized=True` 时 `device` 参数会被忽略并提示；不要试图把它搬到 GPU |
+| **启动时预热** | 加载耗时约 1.0 秒（int8）/ 0.9 秒（fp32），在服务启动阶段调用 `get_predictor()` 即可 |
+| **空文本会抛 `ValueError`** | 空串 / 纯空白 / 空列表都会被拒绝，请在 API 层映射成 422 或 400 |
+| **批量要分块** | `predict_batch` 已内置分块（默认 64/批）；直接把上万条丢进去也不会 OOM |
+| **int8 的置信度与 batch 组成有关** | 动态量化按当前 batch 的激活 min/max 现算 scale，实测置信度漂移约 2.5e-03，**预测标签不受影响**。若业务要求置信度可复现，固定 `batch_size=1` 或恒定批次 |
+| **线程安全** | 模型 eval 模式 + `torch.no_grad()`，前向不改状态；HF tokenizer 是 Rust 实现也线程安全。多线程工作池可共享同一实例，无需加锁 |
+
+### 11.5 命令行自测
+
+```powershell
+$py = "C:\Users\29011\.conda\envs\dl\python.exe"
+& $py -u predict.py                                    # 内置 6 条样例（int8）
+& $py -u predict.py --fp32 --text "手机拍照清晰但电池不耐用" --top-k 3
+```
+
+### 11.6 测试
+
+`test_predict.py` 共 **31 项检查，全部通过**：
+
+```powershell
+& "C:\Users\29011\.conda\envs\dl-gpu\python.exe" -u test_predict.py
+```
+
+| 组 | 覆盖内容 |
+|---|---|
+| 1 加载与元信息 | int8 强制 CPU、fp32 跟随 config、参数量 15,560,457、体积、类别表、load 幂等 |
+| 2 基本输出 | 字段齐全、类别/情感合法、置信度范围、JSON 可序列化、top_k 及降序 |
+| 3 确定性与批量 | 同输入同输出、单条 vs 批量标签一致、分块漂移（int8 2.5e-03 / fp32 0）|
+| 4 边界情况 | 空串/纯空白/空列表/批量含空 均正确报错；超长文本截断标记、短文本未截断 |
+| 5 精度一致率 | fp32 vs int8 前 300 条：大类 **100%**、情感 **99.67%** |
+| 6 **端到端一致性** | **预测器跑完整 9390 条验证集，fp32 复现 `0.8943/0.9202`、int8 复现 `0.8943/0.9204`，与 `eval_result.txt` 记录完全一致** → 证明预处理与离线评估严格对齐 |
+| 7 单例 | 同参数返回同一实例、已预热 |
+
+第 6 组是最有价值的一条：它把「离线指标」和「线上预测」钉死在同一套预处理上，
+避免出现"评估 0.9072、上线却是另一回事"的经典事故。
