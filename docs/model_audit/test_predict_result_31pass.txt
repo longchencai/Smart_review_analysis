@@ -1,0 +1,77 @@
+正在初始化配置文件....
+使用 BERT 模型路径: D:\DEVELOP\Project\ai8_-project1\models\bert_distillation_quantization/bert-base-chinese
+首次加载 BERT 权重(已缓存复用): D:\DEVELOP\Project\ai8_-project1\models\bert_distillation_quantization/bert-base-chinese
+Loading weights:   0%|          | 0/199 [00:00<?, ?it/s]Loading weights: 100%|██████████| 199/199 [00:00<00:00, 5468.49it/s]
+[transformers] [1mBertModel LOAD REPORT[0m from: D:\DEVELOP\Project\ai8_-project1\models\bert_distillation_quantization/bert-base-chinese
+Key                                        | Status     |  | 
+-------------------------------------------+------------+--+-
+cls.predictions.transform.LayerNorm.weight | UNEXPECTED |  | 
+cls.predictions.transform.dense.weight     | UNEXPECTED |  | 
+cls.predictions.transform.dense.bias       | UNEXPECTED |  | 
+cls.seq_relationship.bias                  | UNEXPECTED |  | 
+cls.seq_relationship.weight                | UNEXPECTED |  | 
+cls.predictions.transform.LayerNorm.bias   | UNEXPECTED |  | 
+cls.predictions.bias                       | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+配置文件初始化动作完成!
+==============================================================================
+StudentPredictor 测试
+==============================================================================
+
+[1] 加载与元信息
+D:\conda_envs\PYTHON_ML\Lib\site-packages\torch\ao\nn\quantized\modules\utils.py:87: UserWarning: torch.quantize_per_tensor, torch.quantize_per_channel and other quantized tensor creation functions that produce tensors with dtype torch.quint8, torch.qint8, and torch.qint32 are deprecated and will be removed in a future PyTorch release. Please see https://github.com/pytorch/pytorch/issues/184982 for more information. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\aten\src\ATen\quantized\Quantizer.cpp:116.)
+  qweight = torch.quantize_per_channel(
+D:\conda_envs\PYTHON_ML\Lib\site-packages\torch\_utils.py:496: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  device=storage.device,
+  [PASS] int8 强制 CPU   device=cpu
+  [PASS] fp32 设备跟随 config   device=cpu
+  [PASS] 参数量正确   15560457 / 15560457
+  [PASS] 体积正确   int8=15.12MB fp32=59.39MB
+  [PASS] 类别映射完整
+  [PASS] 重复 load 幂等
+
+[2] 基本输出结构
+  [PASS] 返回字段齐全
+  [PASS] 类别在合法集合内   数码电子
+  [PASS] 情感在合法集合内   正面评价
+  [PASS] 置信度在 (0,1]   0.9982 / 0.9481
+  [PASS] 可 JSON 序列化
+        -> 数码电子 / 正面评价
+  [PASS] top_k 生效
+  [PASS] top_k 概率降序
+
+[3] 确定性与批量一致性
+  [PASS] 同输入同输出
+  [PASS] 单条 vs 批量：预测标签一致
+  [PASS] 分块导致置信度漂移 < 0.01（动态量化固有行为）   最大差 2.54e-03
+  [PASS] fp32 分块几乎无漂移   最大差 0.00e+00
+
+[4] 边界情况
+  [PASS] 拒绝空字符串
+  [PASS] 拒绝纯空白
+  [PASS] 拒绝空白字符
+  [PASS] 拒绝空列表
+  [PASS] 批量里含空文本时报错   第 [1] 条文本为空或只有空白字符，请过滤后再调用
+  [PASS] 超长文本可预测
+  [PASS] 截断标记正确   token_length=3202
+  [PASS] 短文本未截断   token_length=5
+
+[5] fp32 vs int8 一致率（前 300 条验证集）
+  [PASS] 大类一致率 >= 95%   100.00%
+  [PASS] 情感一致率 >= 95%   99.67%
+
+[6] 端到端一致性：预测器跑完整验证集，复现 eval_result.txt 的指标
+  [PASS] fp32 复现 大类F1=0.8943 情感F1=0.9202   实测 0.8943 / 0.9202  综合 0.9072
+        fp32: 9390 条 / 186.9s = 19.91 ms/条  (设备 cpu, batch=64)
+  [PASS] int8 复现 大类F1=0.8943 情感F1=0.9204   实测 0.8944 / 0.9203  综合 0.9074
+        int8: 9390 条 / 104.8s = 11.17 ms/条  (设备 cpu, batch=64)
+
+[7] 单例复用
+  [PASS] 同参数返回同一实例
+  [PASS] 单例已预热（load 耗时已记录）   0.327s
+
+==============================================================================
+结果：31 通过 / 0 失败
+==============================================================================

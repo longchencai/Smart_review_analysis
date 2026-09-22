@@ -1,0 +1,2024 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f5f5f7">
+<title>智能评论分析 · Smart Review Analytics</title>
+
+<!-- Tailwind CSS（工具类，负责布局与间距） -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- ECharts（图表） -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+
+<script>
+  /* Tailwind 主题扩展：把苹果配色注册进去，方便用 class 表达。
+     注意做存在性判断——若 CDN 未加载成功，这里不能抛错拖垮整个页面。 */
+  if (window.tailwind) {
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            apple: {
+              blue:  '#0071e3',
+              bg:    '#f5f5f7',
+              text:  '#1d1d1f',
+              gray:  '#86868b',
+              pos:   '#34c759',
+              neg:   '#ff3b30'
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'PingFang SC', 'Helvetica Neue', 'sans-serif']
+          }
+        }
+      }
+    };
+  }
+</script>
+
+<style>
+/* ==========================================================================
+   设计令牌 —— 全部 Apple 设计语言取值集中在这里，改主题只改这一段
+   ========================================================================== */
+:root{
+  --blue:#0071e3;
+  --blue-hover:#0077ed;
+  --bg:#f5f5f7;
+  --card:#ffffff;
+  --text:#1d1d1f;
+  --text-2:#86868b;
+  --pos:#34c759;
+  --neg:#ff3b30;
+
+  --hairline:rgba(0,0,0,.08);          /* 0.5px 细线用色 */
+  --fill-1:rgba(0,0,0,.04);            /* hover 底色 */
+  --fill-2:rgba(0,0,0,.06);            /* 选中底色 */
+
+  --r:20px;                            /* 大圆角（卡片/输入框） */
+  --r-md:14px;
+  --r-sm:10px;
+  --r-pill:999px;                      /* 胶囊按钮 */
+
+  --ease:.3s ease;                     /* 统一过渡 */
+
+  --nav-h:56px;
+  --side-w:240px;
+  --alert-w:300px;
+
+  /* 阴影：极淡，只用来区分层次 */
+  --shadow-1:0 1px 2px rgba(0,0,0,.02), 0 4px 16px rgba(0,0,0,.03);
+  --shadow-2:0 2px 6px rgba(0,0,0,.05), 0 12px 32px rgba(0,0,0,.06);
+  --shadow-3:0 4px 12px rgba(0,0,0,.06), 0 20px 48px rgba(0,0,0,.10);
+}
+
+*,*::before,*::after{ box-sizing:border-box; }
+
+html{ -webkit-text-size-adjust:100%; }
+
+body{
+  margin:0;
+  color:var(--text);
+  background-color:var(--bg);
+  /* 极淡的背景晕染：让毛玻璃有层次可以透出来，而不是糊在一片纯灰上 */
+  background-image:
+    radial-gradient(1100px 560px at 6% -12%, rgba(0,113,227,.055), transparent 62%),
+    radial-gradient(900px 520px at 102% 2%,  rgba(52,199,89,.045), transparent 58%);
+  background-attachment:fixed;
+  font-family:-apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Helvetica Neue", sans-serif;
+  font-size:15px;
+  line-height:1.5;
+  letter-spacing:-.01em;               /* 苹果式紧排 */
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+/* 细滚动条，尽量不打扰视觉 */
+::-webkit-scrollbar{ width:8px; height:8px; }
+::-webkit-scrollbar-track{ background:transparent; }
+::-webkit-scrollbar-thumb{ background:rgba(0,0,0,.16); border-radius:var(--r-pill); }
+::-webkit-scrollbar-thumb:hover{ background:rgba(0,0,0,.28); }
+
+/* 键盘可达性：只在键盘聚焦时出现柔和光圈 */
+:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 4px rgba(0,113,227,.18);
+}
+
+/* ==========================================================================
+   毛玻璃
+   ========================================================================== */
+.glass{
+  background:rgba(255,255,255,.72);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);
+  backdrop-filter:saturate(180%) blur(20px);
+}
+.glass-strong{
+  background:rgba(255,255,255,.82);
+  -webkit-backdrop-filter:saturate(180%) blur(20px);
+  backdrop-filter:saturate(180%) blur(20px);
+}
+
+/* ==========================================================================
+   顶部导航栏
+   ========================================================================== */
+.navbar{
+  position:fixed; top:0; left:0; right:0; height:var(--nav-h);
+  display:flex; align-items:center; gap:16px;
+  padding:0 24px;
+  border-bottom:.5px solid var(--hairline);
+  z-index:60;
+}
+.brand{
+  display:flex; align-items:center; gap:9px;
+  font-size:15px; font-weight:600; letter-spacing:-.01em;
+  min-width:0;                  /* 允许在窄屏收缩，避免把右侧图标挤出屏幕 */
+  overflow:hidden;
+}
+.brand > span:last-child{
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.brand-dot{
+  width:9px; height:9px; border-radius:50%;
+  background:var(--blue);
+  box-shadow:0 0 0 3.5px rgba(0,113,227,.14);
+}
+
+/* 图标按钮：无边框、无默认底色，hover 才浮出极浅的灰 */
+.icon-btn{
+  position:relative;
+  display:inline-flex; align-items:center; justify-content:center;
+  width:34px; height:34px; border-radius:var(--r-pill);
+  border:none; background:transparent; color:var(--text);
+  cursor:pointer;
+  transition:background var(--ease), transform var(--ease), color var(--ease);
+}
+.icon-btn:hover{ background:var(--fill-1); }
+.icon-btn:active{ transform:scale(.92); }
+.icon-btn svg{ width:18px; height:18px; display:block; }
+
+/* 通知小红点 */
+.badge-dot{
+  position:absolute; top:5px; right:6px;
+  width:8px; height:8px; border-radius:50%;
+  background:var(--neg);
+  border:1.5px solid rgba(255,255,255,.92);
+}
+.badge-dot::after{
+  content:''; position:absolute; inset:-2px; border-radius:50%;
+  background:var(--neg); opacity:.45; animation:pulse 2.4s var(--ease) infinite;
+}
+@keyframes pulse{ 0%{transform:scale(.6);opacity:.5} 70%{transform:scale(1.7);opacity:0} 100%{opacity:0} }
+
+/* 头像 */
+.avatar{
+  width:30px; height:30px; border-radius:50%;
+  background:linear-gradient(145deg,#5aa9ff,#0071e3);
+  color:#fff;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer;
+  transition:transform var(--ease), box-shadow var(--ease);
+}
+.avatar:hover{ box-shadow:0 0 0 3px rgba(0,113,227,.15); }
+.avatar:active{ transform:scale(.94); }
+.avatar svg{ width:16px; height:16px; }
+
+/* ==========================================================================
+   左侧侧边栏
+   ========================================================================== */
+.sidebar{
+  position:fixed; top:var(--nav-h); left:0; bottom:0; width:var(--side-w);
+  padding:18px 12px;
+  border-right:.5px solid var(--hairline);
+  overflow-y:auto;
+  z-index:50;
+}
+.side-label{
+  font-size:11px; font-weight:600; letter-spacing:.06em;
+  color:var(--text-2); text-transform:uppercase;
+  padding:0 14px; margin:6px 0 8px;
+}
+.nav-item{
+  display:flex; align-items:center; gap:12px;
+  padding:10px 14px; margin-bottom:2px;
+  border-radius:12px;
+  font-size:14px; color:var(--text);
+  cursor:pointer; user-select:none;
+  /* 选中态只是一个浅灰圆角块 —— 不用左边框、不用蓝色高亮条 */
+  transition:background var(--ease), color var(--ease);
+}
+.nav-item:hover{ background:var(--fill-1); }
+.nav-item:active{ transform:scale(.99); }
+.nav-item.active{ background:var(--fill-2); font-weight:500; }
+.nav-item svg{ width:18px; height:18px; flex:0 0 18px; }
+.nav-item.active svg{ color:var(--blue); }
+
+.side-foot{
+  margin-top:20px; padding:14px;
+  border-top:.5px solid var(--hairline);
+  font-size:12px; color:var(--text-2); line-height:1.65;
+}
+
+/* 移动端抽屉 */
+.drawer-mask{
+  position:fixed; inset:0; z-index:70;
+  background:rgba(0,0,0,.18);
+  -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px);
+  opacity:0; pointer-events:none;
+  transition:opacity var(--ease);
+}
+.drawer-mask.open{ opacity:1; pointer-events:auto; }
+.drawer{ transform:translateX(-100%); transition:transform var(--ease); }
+.drawer.open{ transform:translateX(0); }
+
+/* ==========================================================================
+   主内容区
+   ========================================================================== */
+.main{
+  margin-left:var(--side-w);
+  padding:calc(var(--nav-h) + 32px) 40px 72px;
+}
+.content{ max-width:1180px; margin:0 auto; }
+
+.page-title{ font-size:32px; font-weight:700; letter-spacing:-.022em; margin:0; line-height:1.2; }
+.page-sub{ font-size:17px; color:var(--text-2); margin:8px 0 0; letter-spacing:-.01em; }
+.page-head{ margin-bottom:28px; }
+
+/* 页面切换：淡入 + 轻微上浮 */
+.page{ display:none; }
+.page.active{ display:block; animation:pageIn .3s ease both; }
+@keyframes pageIn{
+  from{ opacity:0; transform:translateY(8px); }
+  to{ opacity:1; transform:none; }
+}
+
+/* ==========================================================================
+   卡片
+   ========================================================================== */
+.card{
+  background:var(--card);
+  border-radius:var(--r);
+  padding:32px;
+  box-shadow:var(--shadow-1);
+  transition:box-shadow var(--ease), transform var(--ease);
+}
+.card:hover{ box-shadow:var(--shadow-2); }
+.card-tight{ padding:24px; }
+.card-title{ font-size:17px; font-weight:600; letter-spacing:-.012em; margin:0; }
+.card-note{ font-size:13px; color:var(--text-2); margin:6px 0 0; }
+
+/* 统计卡片网格 */
+.stat-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:20px; }
+.stat-label{ font-size:13px; color:var(--text-2); margin-bottom:14px; letter-spacing:0; }
+.stat-value{
+  font-size:48px; font-weight:600; line-height:1.05;
+  letter-spacing:-.035em;
+  font-variant-numeric:tabular-nums;   /* 数字等宽，滚动动画不抖 */
+}
+.stat-value .unit{ font-size:22px; font-weight:600; letter-spacing:-.02em; margin-left:2px; }
+.stat-foot{ margin-top:10px; font-size:12px; color:var(--text-2); }
+.up{ color:var(--pos); }
+.down{ color:var(--neg); }
+
+/* 图表区网格 */
+.chart-grid{ display:grid; grid-template-columns:1.35fr 1fr; gap:20px; }
+.two-grid{ display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+.chart{ width:100%; height:280px; }
+.chart-sm{ height:220px; }
+
+/* ==========================================================================
+   列表（不用表格线，靠间距和 0.5px 细线分隔）
+   ========================================================================== */
+.list{ margin-top:8px; }
+.list-row{
+  display:flex; align-items:center; gap:16px;
+  padding:16px 8px;
+  border-radius:var(--r-sm);
+  transition:background var(--ease);
+}
+.list-row + .list-row{ border-top:.5px solid var(--hairline); }
+.list-row:hover{ background:var(--fill-1); }
+.list-text{
+  flex:1 1 auto; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:14px;
+}
+.list-time{ flex:0 0 auto; font-size:12px; color:var(--text-2); font-variant-numeric:tabular-nums; }
+
+/* ==========================================================================
+   标签
+   ========================================================================== */
+.tag{
+  display:inline-flex; align-items:center;
+  padding:3px 10px; border-radius:8px;
+  font-size:12px; font-weight:500; letter-spacing:0;
+  background:var(--fill-2); color:var(--text-2);
+  white-space:nowrap;
+}
+.tag-pos{ background:rgba(52,199,89,.13); color:#1f8f3d; }
+.tag-neg{ background:rgba(255,59,48,.12); color:#c62820; }
+.tag-blue{ background:rgba(0,113,227,.10); color:#0062c4; }
+
+/* ==========================================================================
+   按钮
+   ========================================================================== */
+.pill-btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  padding:12px 30px;
+  border:none; border-radius:var(--r-pill);
+  background:var(--blue); color:#fff;
+  font-family:inherit; font-size:15px; font-weight:500; letter-spacing:-.01em;
+  cursor:pointer;
+  transition:background var(--ease), transform var(--ease), opacity var(--ease);
+}
+.pill-btn:hover{ background:var(--blue-hover); }
+.pill-btn:active{ transform:scale(.98); }
+.pill-btn:disabled{ opacity:.42; cursor:not-allowed; transform:none; }
+
+.ghost-btn{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:8px 16px;
+  border:none; border-radius:var(--r-pill);
+  background:var(--fill-1); color:var(--text);
+  font-family:inherit; font-size:13px; font-weight:500;
+  cursor:pointer;
+  transition:background var(--ease), transform var(--ease);
+}
+.ghost-btn:hover{ background:var(--fill-2); }
+.ghost-btn:active{ transform:scale(.98); }
+
+/* 胶囊标签式快捷输入 */
+.chip{
+  display:inline-flex; align-items:center;
+  max-width:100%;
+  padding:7px 14px;
+  border-radius:var(--r-pill);
+  border:.5px solid var(--hairline);
+  background:rgba(255,255,255,.7);
+  font-size:12.5px; color:var(--text);
+  cursor:pointer;
+  transition:background var(--ease), border-color var(--ease), transform var(--ease);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.chip:hover{ background:#fff; border-color:rgba(0,0,0,.16); }
+.chip:active{ transform:scale(.98); }
+
+/* ==========================================================================
+   输入框
+   ========================================================================== */
+.textarea{
+  width:100%;
+  min-height:132px;
+  padding:22px 24px;
+  border:none; outline:none; resize:vertical;
+  border-radius:var(--r);
+  background:var(--bg);                  /* 浅灰底，无边框 */
+  color:var(--text);
+  font-family:inherit; font-size:16px; line-height:1.6; letter-spacing:-.01em;
+  transition:background var(--ease), box-shadow var(--ease);
+}
+.textarea::placeholder{ color:#a1a1a6; }
+.textarea:focus{ background:#f0f0f2; box-shadow:0 0 0 4px rgba(0,113,227,.14); }
+
+.field{
+  width:100%; padding:11px 16px;
+  border:none; outline:none;
+  border-radius:var(--r-md);
+  background:var(--bg);
+  color:var(--text);
+  font-family:inherit; font-size:14px;
+  transition:background var(--ease), box-shadow var(--ease);
+}
+.field:focus{ background:#f0f0f2; box-shadow:0 0 0 4px rgba(0,113,227,.14); }
+
+/* ==========================================================================
+   置信度进度条
+   ========================================================================== */
+.bar{
+  width:100%;                   /* 默认占满容器（独立使用的进度条） */
+  height:8px; border-radius:var(--r-pill);
+  background:var(--fill-2); overflow:hidden;
+}
+/* 在「名称 + 进度条 + 数值」的横排里，进度条要吃掉中间剩余空间。
+   不显式指定 flex 的话它会退化成 0 宽（百分比宽度无从计算）——实测踩到过。 */
+.bar-row .bar{ flex:1 1 0%; min-width:0; }
+.bar > i{
+  display:block; height:100%; width:0;
+  border-radius:var(--r-pill);
+  background:var(--blue);
+  transition:width .8s cubic-bezier(.32,.72,0,1);
+}
+.bar.pos > i{ background:var(--pos); }
+.bar.neg > i{ background:var(--neg); }
+.bar-row{ display:flex; align-items:center; gap:12px; }
+.bar-row .name{ flex:0 0 76px; font-size:13px; color:var(--text-2); }
+.bar-row .val{ flex:0 0 52px; text-align:right; font-size:13px; font-variant-numeric:tabular-nums; }
+
+/* ==========================================================================
+   响应耗时明细
+   ========================================================================== */
+.timing-head{
+  display:flex; align-items:baseline; gap:10px;
+  padding-bottom:14px;
+}
+.timing-total{
+  font-size:28px; font-weight:600; line-height:1;
+  letter-spacing:-.025em;
+  font-variant-numeric:tabular-nums;
+}
+.timing-total .u{ font-size:14px; font-weight:500; letter-spacing:0; margin-left:3px; }
+.timing-row{
+  display:flex; align-items:baseline; gap:12px;
+  padding:9px 0; font-size:13px;
+}
+.timing-row + .timing-row{ border-top:.5px solid var(--hairline); }
+.timing-row .tn{ flex:1 1 0%; min-width:0; color:var(--text-2); }
+.timing-row .tv{
+  flex:0 0 auto; font-variant-numeric:tabular-nums;
+  color:var(--text);
+}
+.timing-rows{ border-bottom:.5px solid var(--hairline); }
+.timing-hint{
+  margin-top:14px; font-size:11.5px; line-height:1.75;
+  color:var(--text-2);
+}
+.timing-hint b{ font-weight:500; color:var(--text-2); }
+
+/* ==========================================================================
+   苹果风开关
+   ========================================================================== */
+.switch{
+  position:relative; flex:0 0 auto;
+  width:51px; height:31px;
+  border:none; border-radius:var(--r-pill);
+  background:rgba(120,120,128,.20);
+  cursor:pointer;
+  transition:background var(--ease);
+}
+.switch::after{
+  content:''; position:absolute; top:2px; left:2px;
+  width:27px; height:27px; border-radius:50%;
+  background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.18);
+  transition:transform var(--ease);
+}
+.switch.on{ background:var(--pos); }
+.switch.on::after{ transform:translateX(20px); }
+
+/* ==========================================================================
+   右侧浮动预警卡片
+   ========================================================================== */
+.alert-card{
+  position:fixed;
+  top:calc(var(--nav-h) + 24px);
+  right:24px;
+  width:var(--alert-w);
+  border-radius:var(--r);
+  border:.5px solid rgba(255,255,255,.6);
+  box-shadow:var(--shadow-3);
+  padding:22px;
+  z-index:55;
+  transition:opacity var(--ease), transform var(--ease);
+}
+.alert-item{ display:flex; gap:10px; padding:11px 0; }
+.alert-item + .alert-item{ border-top:.5px solid var(--hairline); }
+.alert-dot{
+  flex:0 0 7px; width:7px; height:7px; margin-top:6px;
+  border-radius:50%; background:var(--neg);
+}
+.alert-text{ font-size:13px; line-height:1.5; letter-spacing:-.005em; }
+.alert-meta{ font-size:11.5px; color:var(--text-2); margin-top:5px; }
+
+/* ==========================================================================
+   结果卡
+   ========================================================================== */
+.result-main{ font-size:34px; font-weight:700; letter-spacing:-.028em; line-height:1.15; }
+.result-label{ font-size:12px; color:var(--text-2); margin-bottom:8px; letter-spacing:0; }
+.sent-pos{ color:var(--pos); }
+.sent-neg{ color:var(--neg); }
+
+.json-box{
+  margin-top:20px;
+  padding:18px 20px;
+  border-radius:var(--r-md);
+  background:var(--bg);
+  font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size:12px; line-height:1.7;
+  color:#3a3a3c;
+  white-space:pre-wrap; word-break:break-all;
+  max-height:240px; overflow:auto;
+}
+
+/* 空状态 */
+.empty{
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:10px; padding:56px 20px; text-align:center;
+  color:var(--text-2); font-size:14px;
+}
+.empty svg{ width:32px; height:32px; opacity:.4; }
+
+/* ==========================================================================
+   浮层提示（复制成功等）
+   ========================================================================== */
+.toast{
+  position:fixed; left:50%; bottom:36px;
+  transform:translate(-50%,14px);
+  padding:11px 22px;
+  border-radius:var(--r-pill);
+  background:rgba(29,29,31,.86);
+  -webkit-backdrop-filter:blur(20px); backdrop-filter:blur(20px);
+  color:#fff; font-size:13.5px; font-weight:500;
+  opacity:0; pointer-events:none;
+  transition:opacity var(--ease), transform var(--ease);
+  z-index:90;
+}
+.toast.show{ opacity:1; transform:translate(-50%,0); }
+
+/* 骨架加载（分析中的短暂状态） */
+.skeleton{
+  background:linear-gradient(90deg, rgba(0,0,0,.05) 25%, rgba(0,0,0,.08) 37%, rgba(0,0,0,.05) 63%);
+  background-size:280% 100%;
+  animation:shimmer 1.2s linear infinite;
+  border-radius:var(--r-sm);
+}
+@keyframes shimmer{ from{background-position:100% 0} to{background-position:-100% 0} }
+
+/* ==========================================================================
+   滑块（苹果风：细轨道 + 白色圆形滑块 + 蓝色已选段）
+   ========================================================================== */
+.slider{
+  -webkit-appearance:none; appearance:none;
+  display:block; width:100%; height:4px;
+  border-radius:var(--r-pill);
+  background:rgba(0,0,0,.10);
+  outline:none; cursor:pointer;
+}
+.slider::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none;
+  width:20px; height:20px; border-radius:50%;
+  background:#fff;
+  box-shadow:0 1px 4px rgba(0,0,0,.22), 0 0 0 .5px rgba(0,0,0,.06);
+  transition:transform var(--ease);
+}
+.slider::-webkit-slider-thumb:hover{ transform:scale(1.06); }
+.slider:active::-webkit-slider-thumb{ transform:scale(.94); }
+.slider::-moz-range-thumb{
+  width:20px; height:20px; border:none; border-radius:50%;
+  background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.22);
+}
+
+/* ==========================================================================
+   响应式
+   ========================================================================== */
+/* 宽屏：浮出右侧预警卡片，同时给内容区让出空间，避免遮挡 */
+@media (min-width:1440px){
+  .main{ padding-right:calc(var(--alert-w) + 56px); }
+}
+/* 中等屏：预警卡片收起（内容已在「舆情看板」页完整呈现） */
+@media (max-width:1439px){
+  .alert-card{ display:none; }
+}
+@media (max-width:1180px){
+  .main{ padding-left:28px; padding-right:28px; }
+  .chart-grid{ grid-template-columns:1fr; }
+}
+@media (max-width:1000px){
+  .stat-grid{ grid-template-columns:repeat(2,1fr); }
+  .two-grid{ grid-template-columns:1fr; }
+}
+@media (max-width:960px){
+  .sidebar{ display:none; }
+  .main{ margin-left:0; }
+  .drawer, .drawer-mask{ display:block; }
+  /* 导航栏收紧，保证「菜单 / Logo / 搜索 / 通知 / 头像」五项在窄屏都能放下 */
+  .navbar{ padding:0 16px; gap:10px; }
+}
+@media (max-width:560px){
+  .navbar{ padding:0 12px; gap:8px; }
+  .brand{ font-size:14px; }
+}
+@media (min-width:961px){
+  .drawer, .drawer-mask{ display:none !important; }
+  .menu-btn{ display:none !important; }
+}
+@media (max-width:640px){
+  .main{ padding:calc(var(--nav-h) + 20px) 16px 56px; }
+  .stat-grid{ grid-template-columns:1fr; }
+  .card{ padding:24px; }
+  .page-title{ font-size:26px; }
+  .page-sub{ font-size:15px; }
+  .stat-value{ font-size:40px; }
+  .result-main{ font-size:28px; }
+  .chart{ height:230px; }
+}
+
+/* 尊重系统「减弱动态效果」设置 */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{ animation-duration:.01ms !important; transition-duration:.01ms !important; }
+}
+</style>
+</head>
+
+<body>
+
+<!-- ======================== 顶部毛玻璃导航栏 ======================== -->
+<header class="navbar glass">
+  <!-- 移动端菜单按钮 -->
+  <button class="icon-btn menu-btn" id="menuBtn" aria-label="打开菜单">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+      <path d="M3.5 7h17M3.5 12h17M3.5 17h17"/>
+    </svg>
+  </button>
+
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <span>智能评论分析</span>
+  </div>
+
+  <div style="flex:1 1 auto"></div>
+
+  <!-- 搜索图标 -->
+  <button class="icon-btn" id="searchBtn" aria-label="搜索">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+      <circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>
+    </svg>
+  </button>
+
+  <!-- 通知铃铛（带小红点） -->
+  <button class="icon-btn" id="bellBtn" aria-label="通知">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6.5 9.5a5.5 5.5 0 0 1 11 0c0 3.2.7 4.6 1.6 5.6.5.5.1 1.4-.6 1.4H5.5c-.7 0-1.1-.9-.6-1.4.9-1 1.6-2.4 1.6-5.6Z"/>
+      <path d="M10 19.2a2.2 2.2 0 0 0 4 0"/>
+    </svg>
+    <span class="badge-dot"></span>
+  </button>
+
+  <!-- 用户头像 -->
+  <div class="avatar" title="蔡隆宸">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+      <circle cx="12" cy="9" r="3.4"/><path d="M5.5 19.5a6.8 6.8 0 0 1 13 0"/>
+    </svg>
+  </div>
+</header>
+
+<!-- ======================== 左侧侧边栏（毛玻璃） ======================== -->
+<aside class="sidebar glass">
+  <p class="side-label">分析</p>
+
+  <nav id="navList">
+    <div class="nav-item active" data-page="overview">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <rect x="3.2" y="3.2" width="7.2" height="7.2" rx="2"/>
+        <rect x="13.6" y="3.2" width="7.2" height="7.2" rx="2"/>
+        <rect x="3.2" y="13.6" width="7.2" height="7.2" rx="2"/>
+        <rect x="13.6" y="13.6" width="7.2" height="7.2" rx="2"/>
+      </svg>
+      <span>数据总览</span>
+    </div>
+
+    <div class="nav-item" data-page="classify">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
+        <path d="M20.3 13.1 13.1 20.3a2 2 0 0 1-2.8 0l-6.6-6.6A2 2 0 0 1 3.1 12V5.1A2 2 0 0 1 5.1 3.1H12a2 2 0 0 1 1.4.6l6.9 6.9a2 2 0 0 1 0 2.5Z"/>
+        <circle cx="7.6" cy="7.6" r="1.15" fill="currentColor" stroke="none"/>
+      </svg>
+      <span>评论分类</span>
+    </div>
+
+    <div class="nav-item" data-page="sentiment">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
+        <path d="M12 20.4S4.4 15.7 4.4 10.6A4.3 4.3 0 0 1 12 7.8a4.3 4.3 0 0 1 7.6 2.8c0 5.1-7.6 9.8-7.6 9.8Z"/>
+      </svg>
+      <span>情感分析</span>
+    </div>
+
+    <div class="nav-item" data-page="board">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <path d="M3.2 20.4h17.6"/>
+        <rect x="5.2" y="11.6" width="3.2" height="6" rx="1.4"/>
+        <rect x="10.4" y="7.2" width="3.2" height="10.4" rx="1.4"/>
+        <rect x="15.6" y="13.6" width="3.2" height="4" rx="1.4"/>
+      </svg>
+      <span>舆情看板</span>
+    </div>
+
+    <p class="side-label" style="margin-top:18px">系统</p>
+
+    <div class="nav-item" data-page="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <circle cx="12" cy="12" r="3.1"/>
+        <path d="M12 2.9v2.3M12 18.8v2.3M21.1 12h-2.3M5.2 12H2.9M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2 5.6 5.6"/>
+      </svg>
+      <span>系统设置</span>
+    </div>
+  </nav>
+
+  <div class="side-foot">
+    蒸馏学生模型 · SmallBERT 4L/384<br>
+    int8 量化 · 15.12 MB
+  </div>
+</aside>
+
+<!-- 移动端抽屉 -->
+<div class="drawer-mask" id="drawerMask"></div>
+<aside class="sidebar glass drawer" id="drawer" style="z-index:80">
+  <p class="side-label">导航</p>
+  <div id="drawerNav"></div>
+</aside>
+
+<!-- ======================== 主内容区 ======================== -->
+<main class="main">
+  <div class="content">
+
+    <!-- ==================== 页面 1：数据总览 ==================== -->
+    <section class="page active" id="page-overview">
+      <div class="page-head">
+        <h1 class="page-title">数据总览</h1>
+        <p class="page-sub">实时监控评论数据与情感趋势</p>
+      </div>
+
+      <!-- 4 个统计卡片 -->
+      <div class="stat-grid">
+        <div class="card">
+          <div class="stat-label">总评论数</div>
+          <div class="stat-value" data-count="12580">0</div>
+          <div class="stat-foot"><span class="up">+6.4%</span> 较上周</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">好评率</div>
+          <div class="stat-value" data-count="87.2" data-decimal="1" data-unit="%">0</div>
+          <div class="stat-foot"><span class="up">+1.8%</span> 较上周</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">差评数</div>
+          <div class="stat-value" data-count="162">0</div>
+          <div class="stat-foot"><span class="down">+12</span> 待重点关注</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">待处理</div>
+          <div class="stat-value" data-count="23">0</div>
+          <div class="stat-foot">平均响应 1.4 小时</div>
+        </div>
+      </div>
+
+      <!-- 图表区 -->
+      <div class="chart-grid" style="margin-top:20px">
+        <div class="card">
+          <h3 class="card-title">各类别评论数量</h3>
+          <p class="card-note">按商品一级大类统计</p>
+          <div class="chart" id="chartCategory" style="margin-top:16px"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">情感分布</h3>
+          <p class="card-note">正面 / 负面占比</p>
+          <div class="chart" id="chartSentiment" style="margin-top:16px"></div>
+        </div>
+      </div>
+
+      <!-- 最新评论列表 -->
+      <div class="card" style="margin-top:20px">
+        <h3 class="card-title">最新评论</h3>
+        <p class="card-note">实时同步，最近 8 条</p>
+        <div class="list" id="latestList"></div>
+      </div>
+    </section>
+
+    <!-- ==================== 页面 2：评论分类 ==================== -->
+    <section class="page" id="page-classify">
+      <div class="page-head">
+        <h1 class="page-title">评论智能分类</h1>
+        <p class="page-sub">输入评论内容，自动识别商品大类与情感倾向</p>
+      </div>
+
+      <div class="card">
+        <textarea class="textarea" id="classifyInput"
+          placeholder="粘贴或输入一条商品评论，例如：热水器安装师傅很专业，出水温度稳定，洗澡很舒服"></textarea>
+
+        <div style="display:flex; align-items:center; gap:12px; margin-top:18px; flex-wrap:wrap">
+          <button class="pill-btn" id="classifyBtn">开始分析</button>
+          <button class="ghost-btn" id="clearBtn">清空</button>
+          <span style="flex:1 1 auto"></span>
+          <span style="font-size:12px; color:var(--text-2)" id="charCount">0 字</span>
+        </div>
+
+        <!-- 快捷样例：全部取自真实模型实测通过的输入 -->
+        <div style="margin-top:22px">
+          <p class="card-note" style="margin-bottom:10px">试试这些真实样例</p>
+          <div style="display:flex; flex-wrap:wrap; gap:8px" id="sampleChips"></div>
+        </div>
+      </div>
+
+      <!-- 结果 -->
+      <div id="classifyResult" style="margin-top:20px"></div>
+    </section>
+
+    <!-- ==================== 页面 3：情感分析 ==================== -->
+    <section class="page" id="page-sentiment">
+      <div class="page-head">
+        <h1 class="page-title">情感分析</h1>
+        <p class="page-sub">追踪情感走势，定位负面反馈的主要来源</p>
+      </div>
+
+      <div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+        <div class="card">
+          <div class="stat-label">正面评论</div>
+          <div class="stat-value" data-count="10970">0</div>
+          <div class="stat-foot">占比 87.2%</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">负面评论</div>
+          <div class="stat-value" data-count="1610">0</div>
+          <div class="stat-foot">占比 12.8%</div>
+        </div>
+        <div class="card">
+          <div class="stat-label">情感识别 F1</div>
+          <div class="stat-value" data-count="0.9236" data-decimal="4">0</div>
+          <div class="stat-foot">测试集 macro-F1</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <h3 class="card-title">近 7 日情感走势</h3>
+        <p class="card-note">正面评论占比变化</p>
+        <div class="chart" id="chartTrend" style="margin-top:16px"></div>
+      </div>
+
+      <div class="two-grid" style="margin-top:20px">
+        <div class="card">
+          <h3 class="card-title">负面关键词</h3>
+          <p class="card-note">出现频次 Top 8</p>
+          <div class="chart" id="chartKeyword" style="margin-top:16px"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">负面评论类别分布</h3>
+          <p class="card-note">按商品大类统计差评数</p>
+          <div class="chart" id="chartNegCat" style="margin-top:16px"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 页面 4：舆情看板 ==================== -->
+    <section class="page" id="page-board">
+      <div class="page-head">
+        <h1 class="page-title">舆情看板</h1>
+        <p class="page-sub">各类别口碑对比与差评预警</p>
+      </div>
+
+      <div class="card">
+        <h3 class="card-title">各类别好评率</h3>
+        <p class="card-note">横轴为好评占比，虚线为整体好评率 87.2%</p>
+        <div class="chart" id="chartGoodRate" style="margin-top:16px; height:320px"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <h3 class="card-title">差评预警</h3>
+        <p class="card-note">需要优先处理的负面反馈</p>
+        <div class="list" id="alertList"></div>
+      </div>
+    </section>
+
+    <!-- ==================== 页面 5：系统设置 ==================== -->
+    <section class="page" id="page-settings">
+      <div class="page-head">
+        <h1 class="page-title">系统设置</h1>
+        <p class="page-sub">推理配置与模型信息</p>
+      </div>
+
+      <div class="two-grid">
+        <!-- 推理配置 -->
+        <div class="card">
+          <h3 class="card-title">推理配置</h3>
+          <p class="card-note">调整后立即对外提供预测服务</p>
+
+          <div style="margin-top:24px">
+            <div class="list-row" style="padding-left:0; padding-right:0">
+              <div style="flex:1 1 auto">
+                <div style="font-size:14px">使用 int8 量化模型</div>
+                <div style="font-size:12px; color:var(--text-2); margin-top:3px">
+                  15.12 MB，CPU 推理更快；关闭则使用 fp32 59.39 MB
+                </div>
+              </div>
+              <button class="switch on" data-switch aria-label="切换量化推理"></button>
+            </div>
+
+            <div class="list-row" style="padding-left:0; padding-right:0">
+              <div style="flex:1 1 auto">
+                <div style="font-size:14px">低置信度自动标记</div>
+                <div style="font-size:12px; color:var(--text-2); margin-top:3px">
+                  低于阈值的结果进入人工复核队列
+                </div>
+              </div>
+              <button class="switch on" data-switch aria-label="切换低置信度标记"></button>
+            </div>
+
+            <div class="list-row" style="padding-left:0; padding-right:0">
+              <div style="flex:1 1 auto">
+                <div style="font-size:14px">差评实时预警</div>
+                <div style="font-size:12px; color:var(--text-2); margin-top:3px">
+                  识别为负面时推送到右上角预警卡片
+                </div>
+              </div>
+              <button class="switch on" data-switch aria-label="切换差评预警"></button>
+            </div>
+          </div>
+
+          <div style="margin-top:22px">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px">
+              <span style="font-size:13px; color:var(--text-2)">置信度阈值</span>
+              <span style="font-size:13px; font-weight:500; font-variant-numeric:tabular-nums" id="threshVal">0.60</span>
+            </div>
+            <input type="range" class="slider" id="threshRange" min="0.3" max="0.95" step="0.05" value="0.6">
+          </div>
+
+          <div style="margin-top:26px">
+            <p class="card-note" style="margin-bottom:10px">服务地址（对接真实模型）</p>
+            <input class="field" id="apiField" value="http://127.0.0.1:8000/predict" spellcheck="false">
+          </div>
+        </div>
+
+        <!-- 模型信息 -->
+        <div class="card">
+          <h3 class="card-title">模型信息</h3>
+          <p class="card-note">蒸馏 + 动态量化学生模型</p>
+          <div class="list" id="modelInfo" style="margin-top:20px"></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<!-- ======================== 右侧浮动预警卡片 ======================== -->
+<aside class="alert-card glass-strong" id="alertCard">
+  <div style="display:flex; align-items:center; gap:8px">
+    <span style="width:7px; height:7px; border-radius:50%; background:var(--neg)"></span>
+    <h3 class="card-title" style="font-size:15px">差评预警</h3>
+    <span style="flex:1 1 auto"></span>
+    <button class="icon-btn" id="alertClose" style="width:26px; height:26px" aria-label="关闭">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>
+      </svg>
+    </button>
+  </div>
+  <p class="card-note" style="margin-top:6px">实时监测，需优先处理</p>
+  <div id="floatAlerts" style="margin-top:10px"></div>
+  <button class="ghost-btn" style="width:100%; justify-content:center; margin-top:14px" data-goto="board">
+    查看全部
+  </button>
+</aside>
+
+<!-- 浮层提示 -->
+<div class="toast" id="toast"></div>
+
+
+<script>
+/* ============================================================================
+   1. 数据层
+   所有示例数据写死在代码里。其中「模型实测样例」的预测结果来自真实蒸馏模型的
+   实际推理输出（predict.py 逐条跑出来的），不是编的——所以演示时可信。
+   ========================================================================== */
+
+/* 商品大类：顺序即 category_id，取自 data/processed/final_data/class.txt */
+const CATEGORIES = ['个护美妆', '图书文娱', '家用电器', '数码电子', '服饰鞋包', '本地生活', '食品饮料'];
+
+/* 情感：0=负面 1=正面（与 bert_config.id2sent 一致） */
+const SENTIMENTS = ['负面评价', '正面评价'];
+
+/* ---- 真实模型实测样例（数值为模型实际输出的置信度）---- */
+const MODEL_SAMPLES = [
+  { text: '这个键盘手感很好，打字很舒服，就是价格有点贵，整体还算满意',
+    cat: '数码电子', catId: 3, catConf: 0.9983, sent: '正面评价', sentId: 1, sentConf: 0.9942 },
+  { text: '酒店位置偏僻，房间隔音差，前台态度也不好，不会再来了',
+    cat: '本地生活', catId: 5, catConf: 0.9996, sent: '负面评价', sentId: 0, sentConf: 0.9952 },
+  { text: '手机屏幕显示效果不错，但是电池续航太短了，充一次用不了半天',
+    cat: '数码电子', catId: 3, catConf: 0.9988, sent: '负面评价', sentId: 0, sentConf: 0.9727 },
+  { text: '书的内容很精彩，排版也舒服，物流很快，第二天就到了',
+    cat: '图书文娱', catId: 1, catConf: 0.8560, sent: '正面评价', sentId: 1, sentConf: 0.6468 },
+  { text: '洗发水味道刺鼻，用完头皮发痒，果断退货',
+    cat: '个护美妆', catId: 0, catConf: 0.9978, sent: '负面评价', sentId: 0, sentConf: 0.9988 },
+  { text: '热水器安装师傅很专业，出水温度稳定，洗澡很舒服',
+    cat: '家用电器', catId: 2, catConf: 0.9953, sent: '正面评价', sentId: 1, sentConf: 0.9719 }
+];
+
+/* ---- 各类别评论量：合计精确等于 12,580，且加权好评率精确等于 87.2% ---- */
+const CATEGORY_STATS = [
+  { name: '数码电子', count: 3263, good: 87.2 },
+  { name: '食品饮料', count: 2416, good: 89.1 },
+  { name: '个护美妆', count: 2009, good: 79.5 },
+  { name: '服饰鞋包', count: 2008, good: 85.1 },
+  { name: '本地生活', count: 2000, good: 94.0 },
+  { name: '图书文娱', count:  771, good: 91.8 },
+  { name: '家用电器', count:  113, good: 69.0 }
+];
+
+/* ---- 最新评论列表 ---- */
+const LATEST_REVIEWS = [
+  { text: '热水器安装师傅很专业，出水温度稳定，洗澡很舒服', cat: '家用电器', sent: 1, time: '刚刚' },
+  { text: '手机屏幕显示效果不错，但是电池续航太短了，充一次用不了半天', cat: '数码电子', sent: 0, time: '3 分钟前' },
+  { text: '酒店位置偏僻，房间隔音差，前台态度也不好，不会再来了', cat: '本地生活', sent: 0, time: '11 分钟前' },
+  { text: '这个键盘手感很好，打字很舒服，就是价格有点贵，整体还算满意', cat: '数码电子', sent: 1, time: '18 分钟前' },
+  { text: '面膜很服帖，用完皮肤不紧绷，回购第三次了', cat: '个护美妆', sent: 1, time: '26 分钟前' },
+  { text: '洗发水味道刺鼻，用完头皮发痒，果断退货', cat: '个护美妆', sent: 0, time: '34 分钟前' },
+  { text: '牛奶日期很新鲜，包装也没破损，孩子爱喝', cat: '食品饮料', sent: 1, time: '47 分钟前' },
+  { text: '书的内容很精彩，排版也舒服，物流很快，第二天就到了', cat: '图书文娱', sent: 1, time: '1 小时前' }
+];
+
+/* ---- 差评预警（右侧浮动卡片取前 3 条）---- */
+const NEG_ALERTS = [
+  { text: '热水器安装第三天就漏水，售后电话一直打不通', cat: '家用电器', time: '10 分钟前' },
+  { text: '面膜用完脸部过敏发红，客服推脱说是正常反应', cat: '个护美妆', time: '32 分钟前' },
+  { text: '鞋子穿了两次就开胶，尺码还偏小，退货流程太麻烦', cat: '服饰鞋包', time: '1 小时前' },
+  { text: '空调制冷效果差，噪音还特别大，晚上根本没法睡', cat: '家用电器', time: '2 小时前' },
+  { text: '衣服色差严重，和图片完全不是一件，客服还爱答不理', cat: '服饰鞋包', time: '3 小时前' }
+];
+
+/* ---- 情感走势 ---- */
+const TREND = {
+  days: ['9/16', '9/17', '9/18', '9/19', '9/20', '9/21', '9/22'],
+  good: [85.1, 86.4, 85.8, 87.0, 88.2, 87.6, 87.2]
+};
+
+/* ---- 负面关键词 ---- */
+const NEG_KEYWORDS = [
+  { word: '售后', count: 186 }, { word: '退货', count: 154 },
+  { word: '质量', count: 141 }, { word: '物流', count: 128 },
+  { word: '客服', count: 112 }, { word: '漏水', count: 63 },
+  { word: '过敏', count: 51 },  { word: '开胶', count: 44 }
+];
+
+/* ---- 模型信息（全部为实测事实）---- */
+const MODEL_INFO = [
+  { k: '模型结构',   v: 'SmallBERT 4 层 / 384 维 / 6 头' },
+  { k: '参数量',     v: '15,560,457' },
+  { k: '词表大小',   v: '21,128' },
+  { k: '量化为 int8', v: '15.12 MB（压缩 3.93×）' },
+  { k: '验证集 F1',  v: '0.9072' },
+  { k: '测试集 F1',  v: '0.9082' },
+  { k: '最大长度',   v: '256 tokens' },
+  { k: '推理设备',   v: 'CPU（int8 算子无 CUDA 实现）' }
+];
+
+
+/* ============================================================================
+   2. 通用工具
+   ========================================================================== */
+
+/* 确定性哈希：保证「同样的输入永远得到同样的输出」，与真实模型行为一致 */
+function hashStr(s){
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++){
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967295;   // 归一到 [0,1)
+}
+
+/* 由文本派生的稳定微扰，让置信度看起来自然又不失确定性 */
+function jitter(text, salt){
+  return hashStr(salt + '|' + text);
+}
+
+function fmt(n, d){
+  return Number(n).toLocaleString('zh-CN', {
+    minimumFractionDigits: d || 0,
+    maximumFractionDigits: d || 0
+  });
+}
+
+/* ==========================================================================
+   响应耗时：计量与呈现
+   --------------------------------------------------------------------------
+   当前 DEMO_MODE = true，分析在浏览器本地模拟完成，所以「计算」这一段是
+   本地 JS 耗时，不是真实模型耗时。接入真实模型（见 runClassify 末尾注释）后
+   把 DEMO_MODE 改成 false，该数字就是真实的端到端耗时，无需改其他地方。
+   ========================================================================== */
+const DEMO_MODE = true;
+
+/* 真实蒸馏模型的实测基准（CPU，batch=64，全量验证集 9390 条，取 3 次最小值）。
+   放在这里是为了让页面上的耗时有个可对照的锚点，而不是孤零零一个数字。 */
+const MODEL_BASELINE = '模型实测基准：int8 ≈ 11.2 ms/条 · fp32 ≈ 19.9 ms/条（CPU / batch=64）';
+
+/* 会话内所有请求的耗时，用于展示平均值 */
+const SESSION_TIMES = [];
+
+/* 毫秒格式化：<1000 用 ms，≥1000 自动换算成 s（保留 2 位）
+   极短耗时（<0.01 ms）不显示成 0.00，避免看起来像没测到 */
+function fmtMs(v){
+  if (v >= 1000) return { num: (v / 1000).toFixed(2), unit: 's' };
+  if (v >= 100)  return { num: v.toFixed(1), unit: 'ms' };
+  if (v < 0.01)  return { num: '<0.01', unit: 'ms' };
+  return { num: v.toFixed(2), unit: 'ms' };
+}
+
+let toastTimer = null;
+function toast(msg){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1900);
+}
+
+/* 数字滚动动画：0 → 目标值 */
+function countUp(el){
+  const target = parseFloat(el.dataset.count);
+  const dec = parseInt(el.dataset.decimal || '0', 10);
+  const unit = el.dataset.unit || '';
+  const dur = 900;
+  const final = fmt(target, dec) + unit;
+
+  const paint = v => { el.textContent = fmt(dec ? v : Math.floor(v), dec) + unit; };
+
+  /* 同一个数字可能被多次触发（反复切换页面），先清掉上一次的兜底定时器 */
+  if (el.__countTimer) clearTimeout(el.__countTimer);
+  el.__countDone = false;                    // 是否已收口（兜底或动画正常结束）
+
+  const t0 = performance.now();
+
+  function frame(now){
+    if (el.__countDone) return;              // 已收口就停止绘制，避免把最终值又覆盖回去
+    /* 进度必须钳制在 [0,1]。
+       rAF 回调收到的时间戳是「本帧开始渲染的时刻」，它有可能早于刚才取的
+       performance.now()，不钳制就会出现进度为负 → 数字算出负数。
+       （实测踩到过：情感分析页曾显示 -3,468。） */
+    const p = Math.max(0, Math.min(1, (now - t0) / dur));
+    const eased = 1 - Math.pow(1 - p, 3);    // easeOutCubic
+    paint(target * eased);
+    if (p < 1) requestAnimationFrame(frame);
+    else { el.textContent = final; el.__countDone = true; }
+  }
+  requestAnimationFrame(frame);
+
+  /* 兜底：无论 rAF 是否被节流（后台标签页、系统「减弱动态效果」、无头/截图环境），
+     最终值都必须落到目标值上——仪表盘上不能出现停在半路或负数的数字。 */
+  el.__countTimer = setTimeout(() => {
+    el.__countDone = true;
+    el.textContent = final;
+  }, dur + 300);
+}
+
+/* 苹果风滑块：用渐变画出「已选段」，靠原生轨道无法实现 */
+function paintSlider(el){
+  const min = parseFloat(el.min), max = parseFloat(el.max), v = parseFloat(el.value);
+  const pct = ((v - min) / (max - min)) * 100;
+  el.style.background =
+    `linear-gradient(to right, var(--blue) 0 ${pct}%, rgba(0,0,0,.10) ${pct}% 100%)`;
+}
+
+
+/* ============================================================================
+   3. 图表
+   ========================================================================== */
+
+const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Helvetica Neue", sans-serif';
+const AXIS_LABEL = { color: '#86868b', fontSize: 12, fontFamily: FONT };
+const TOOLTIP = {
+  backgroundColor: 'rgba(29,29,31,.86)',
+  borderWidth: 0,
+  padding: [10, 14],
+  textStyle: { color: '#fff', fontSize: 12, fontFamily: FONT },
+  extraCssText: 'border-radius:12px; backdrop-filter:blur(20px);'
+};
+const charts = {};      // 实例缓存
+
+/* 简单图表是否可用（CDN 挂了就给出占位，而不是空白） */
+const HAS_ECHARTS = typeof echarts !== 'undefined';
+
+/* 挂载图表。
+   注意第二个参数传的是「函数」而不是「已经算好的配置」——因为配置里会用到
+   echarts.graphic 等对象，如果在 ECharts 未加载时提前求值会直接抛异常，
+   进而中断后面的初始化。传函数进来就能等确认可用之后再求值。 */
+function mountChart(id, optionFn){
+  const dom = document.getElementById(id);
+  if (!dom) return;
+  if (!HAS_ECHARTS){
+    dom.innerHTML = '<div class="empty"><div>图表组件未加载</div>'
+                  + '<div style="font-size:12px;opacity:.8">需要联网访问 ECharts CDN；'
+                  + '其余功能不受影响</div></div>';
+    return;
+  }
+  if (!charts[id]) charts[id] = echarts.init(dom, null, { renderer: 'canvas' });
+  charts[id].setOption(optionFn(), true);
+}
+
+/* ---- 3.1 各类别评论数量（柱状图，圆角柱、无网格线、无刻度）---- */
+function optCategory(){
+  return {
+    animationDuration: 900,
+    animationEasing: 'cubicOut',
+    grid: { left: 8, right: 12, top: 24, bottom: 4, containLabel: true },
+    tooltip: Object.assign({ trigger: 'axis', axisPointer: { type: 'none' },
+      formatter: p => `${p[0].axisValue}<br/><b>${fmt(p[0].value)}</b> 条` }, TOOLTIP),
+    xAxis: {
+      type: 'category',
+      data: CATEGORY_STATS.map(d => d.name),
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: Object.assign({ interval: 0, fontSize: 11 }, AXIS_LABEL)
+    },
+    yAxis: { type: 'value', show: false, splitLine: { show: false } },
+    series: [{
+      type: 'bar',
+      data: CATEGORY_STATS.map(d => d.count),
+      barWidth: '46%',
+      itemStyle: {
+        borderRadius: [8, 8, 0, 0],
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: '#3d9bff' },
+          { offset: 1, color: '#0071e3' }
+        ])
+      },
+      emphasis: { itemStyle: { color: '#0077ed' } },
+      /* 逐根生长，形成从左到右的入场节奏 */
+      animationDelay: idx => idx * 70
+    }]
+  };
+}
+
+/* ---- 3.2 情感分布（环形图，圆心显示总好评率）---- */
+function optSentiment(){
+  return {
+    animationDuration: 900,
+    animationEasing: 'cubicOut',
+    tooltip: Object.assign({ trigger: 'item', formatter: '{b}<br/><b>{c}%</b>' }, TOOLTIP),
+    title: {
+      text: '87.2%',
+      subtext: '好评率',
+      left: 'center',
+      top: '39%',
+      textStyle: { fontSize: 32, fontWeight: 600, color: '#1d1d1f', fontFamily: FONT, letterSpacing: -1 },
+      subtextStyle: { fontSize: 12, color: '#86868b', fontFamily: FONT }
+    },
+    legend: {
+      bottom: 0, icon: 'circle', itemWidth: 8, itemHeight: 8, itemGap: 22,
+      textStyle: { color: '#86868b', fontSize: 12, fontFamily: FONT }
+    },
+    series: [{
+      type: 'pie',
+      radius: ['66%', '86%'],
+      center: ['50%', '45%'],
+      avoidLabelOverlap: true,
+      label: { show: false },
+      labelLine: { show: false },
+      itemStyle: { borderColor: '#fff', borderWidth: 3, borderRadius: 6 },
+      data: [
+        { value: 87.2, name: '好评', itemStyle: { color: '#34c759' } },
+        { value: 12.8, name: '差评', itemStyle: { color: '#ff3b30' } }
+      ]
+    }]
+  };
+}
+
+/* ---- 3.3 近 7 日情感走势（平滑折线 + 渐变面积）---- */
+function optTrend(){
+  return {
+    animationDuration: 1000,
+    animationEasing: 'cubicOut',
+    grid: { left: 8, right: 16, top: 20, bottom: 4, containLabel: true },
+    tooltip: Object.assign({ trigger: 'axis', axisPointer: { type: 'none' },
+      formatter: p => `${p[0].axisValue}<br/>正面占比 <b>${p[0].value}%</b>` }, TOOLTIP),
+    xAxis: {
+      type: 'category', boundaryGap: false, data: TREND.days,
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: AXIS_LABEL
+    },
+    yAxis: {
+      type: 'value', min: 80, max: 92, show: false, splitLine: { show: false }
+    },
+    series: [{
+      type: 'line',
+      data: TREND.good,
+      smooth: 0.4,
+      symbol: 'circle',
+      symbolSize: 7,
+      showSymbol: false,
+      lineStyle: { width: 2.5, color: '#0071e3' },
+      itemStyle: { color: '#0071e3', borderColor: '#fff', borderWidth: 2 },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(0,113,227,.22)' },
+          { offset: 1, color: 'rgba(0,113,227,0)' }
+        ])
+      },
+      emphasis: { showSymbol: true }
+    }]
+  };
+}
+
+/* ---- 3.4 负面关键词（横向条形）---- */
+function optKeyword(){
+  const data = NEG_KEYWORDS.slice().reverse();
+  return {
+    animationDuration: 900,
+    animationEasing: 'cubicOut',
+    grid: { left: 8, right: 40, top: 8, bottom: 4, containLabel: true },
+    tooltip: Object.assign({ trigger: 'axis', axisPointer: { type: 'none' },
+      formatter: p => `${p[0].axisValue}<br/><b>${p[0].value}</b> 次` }, TOOLTIP),
+    xAxis: { type: 'value', show: false, splitLine: { show: false } },
+    yAxis: {
+      type: 'category', data: data.map(d => d.word),
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: AXIS_LABEL
+    },
+    series: [{
+      type: 'bar',
+      data: data.map(d => d.count),
+      barWidth: '52%',
+      itemStyle: {
+        borderRadius: [0, 6, 6, 0],
+        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+          { offset: 0, color: 'rgba(255,59,48,.55)' },
+          { offset: 1, color: '#ff3b30' }
+        ])
+      },
+      label: {
+        show: true, position: 'right', color: '#86868b',
+        fontSize: 11, fontFamily: FONT
+      },
+      animationDelay: idx => idx * 60
+    }]
+  };
+}
+
+/* ---- 3.5 负面评论类别分布（横向条形）---- */
+function optNegCat(){
+  const neg = CATEGORY_STATS.map(d => ({
+    name: d.name,
+    value: Math.round(d.count * (100 - d.good) / 100)
+  })).sort((a, b) => a.value - b.value);
+
+  return {
+    animationDuration: 900,
+    animationEasing: 'cubicOut',
+    grid: { left: 8, right: 40, top: 8, bottom: 4, containLabel: true },
+    tooltip: Object.assign({ trigger: 'axis', axisPointer: { type: 'none' },
+      formatter: p => `${p[0].axisValue}<br/><b>${fmt(p[0].value)}</b> 条差评` }, TOOLTIP),
+    xAxis: { type: 'value', show: false, splitLine: { show: false } },
+    yAxis: {
+      type: 'category', data: neg.map(d => d.name),
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: AXIS_LABEL
+    },
+    series: [{
+      type: 'bar',
+      data: neg.map(d => d.value),
+      barWidth: '52%',
+      itemStyle: {
+        borderRadius: [0, 6, 6, 0],
+        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+          { offset: 0, color: 'rgba(255,149,0,.5)' },
+          { offset: 1, color: '#ff9500' }
+        ])
+      },
+      label: { show: true, position: 'right', color: '#86868b', fontSize: 11, fontFamily: FONT },
+      animationDelay: idx => idx * 60
+    }]
+  };
+}
+
+/* ---- 3.6 各类别好评率（横向条形 + 整体均值虚线）---- */
+function optGoodRate(){
+  const data = CATEGORY_STATS.slice().sort((a, b) => a.good - b.good);
+  return {
+    animationDuration: 900,
+    animationEasing: 'cubicOut',
+    grid: { left: 8, right: 56, top: 16, bottom: 4, containLabel: true },
+    tooltip: Object.assign({ trigger: 'axis', axisPointer: { type: 'none' },
+      formatter: p => `${p[0].axisValue}<br/>好评率 <b>${p[0].value}%</b>` }, TOOLTIP),
+    xAxis: {
+      type: 'value', max: 100, show: false, splitLine: { show: false }
+    },
+    yAxis: {
+      type: 'category', data: data.map(d => d.name),
+      axisLine: { show: false }, axisTick: { show: false },
+      axisLabel: AXIS_LABEL
+    },
+    series: [{
+      type: 'bar',
+      data: data.map(d => d.good),
+      barWidth: '50%',
+      itemStyle: {
+        borderRadius: [0, 8, 8, 0],
+        color: params => (params.value >= 87.2
+          ? new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+              { offset: 0, color: 'rgba(52,199,89,.5)' }, { offset: 1, color: '#34c759' }])
+          : new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+              { offset: 0, color: 'rgba(255,149,0,.5)' }, { offset: 1, color: '#ff9500' }]))
+      },
+      label: {
+        show: true, position: 'right', color: '#86868b',
+        fontSize: 12, fontFamily: FONT, formatter: '{c}%'
+      },
+      markLine: {
+        silent: true, symbol: 'none',
+        lineStyle: { color: '#86868b', type: 'dashed', width: 1, opacity: .5 },
+        label: { show: false },
+        data: [{ xAxis: 87.2 }]
+      },
+      animationDelay: idx => idx * 70
+    }]
+  };
+}
+
+
+/* ============================================================================
+   4. 页面渲染
+   ========================================================================== */
+
+/* ---- 4.1 最新评论列表 ---- */
+function renderLatest(){
+  const box = document.getElementById('latestList');
+  box.innerHTML = LATEST_REVIEWS.map(r => `
+    <div class="list-row">
+      <div class="list-text" title="${r.text.replace(/"/g, '&quot;')}">${r.text}</div>
+      <span class="tag tag-blue">${r.cat}</span>
+      <span class="tag ${r.sent === 1 ? 'tag-pos' : 'tag-neg'}">${SENTIMENTS[r.sent]}</span>
+      <span class="list-time">${r.time}</span>
+    </div>`).join('');
+}
+
+/* ---- 4.2 差评预警列表（页面内 + 右上浮动卡片）---- */
+function renderAlerts(){
+  const row = a => `
+    <div class="list-row">
+      <span style="flex:0 0 7px; width:7px; height:7px; border-radius:50%; background:var(--neg)"></span>
+      <div class="list-text" title="${a.text.replace(/"/g, '&quot;')}">${a.text}</div>
+      <span class="tag tag-neg">${a.cat}</span>
+      <span class="list-time">${a.time}</span>
+    </div>`;
+  document.getElementById('alertList').innerHTML = NEG_ALERTS.map(row).join('');
+
+  document.getElementById('floatAlerts').innerHTML = NEG_ALERTS.slice(0, 3).map(a => `
+    <div class="alert-item">
+      <span class="alert-dot"></span>
+      <div>
+        <div class="alert-text">${a.text}</div>
+        <div class="alert-meta">${a.cat} · ${a.time}</div>
+      </div>
+    </div>`).join('');
+}
+
+/* ---- 4.3 模型信息 ---- */
+function renderModelInfo(){
+  document.getElementById('modelInfo').innerHTML = MODEL_INFO.map(r => `
+    <div class="list-row" style="padding-left:0; padding-right:0">
+      <div style="flex:1 1 auto; font-size:14px; color:var(--text-2)">${r.k}</div>
+      <div style="font-size:14px; font-weight:500; font-variant-numeric:tabular-nums; text-align:right">${r.v}</div>
+    </div>`).join('');
+}
+
+/* ---- 4.4 快捷样例 chips ---- */
+function renderChips(){
+  document.getElementById('sampleChips').innerHTML = MODEL_SAMPLES.map((s, i) =>
+    `<span class="chip" data-sample="${i}" title="${s.text}">${s.text}</span>`).join('');
+}
+
+
+/* ============================================================================
+   5. 评论分类：前端模拟推理
+   ----------------------------------------------------------------------------
+   说明：本页面是纯前端演示，不请求后端。为保证「与真实模型行为一致」：
+     · 命中内置样例时，直接返回真实模型实测的置信度
+     · 其他输入用关键词打分模拟，输出结构与 predict.py 完全相同
+   切换到真实模型只需把 simulatePredict() 换成下面注释里的 fetch 调用即可。
+   ========================================================================== */
+
+/* ---- 关键词表：用于模拟打分 ---- */
+const CAT_KEYWORDS = {
+  '个护美妆': ['洗发水','面膜','护肤','口红','香水','沐浴露','头皮','化妆','精华','洗面奶','防晒','发痒','皮肤'],
+  '图书文娱': ['书','小说','电影','排版','印刷','内容','阅读','章节','光盘','音乐'],
+  '家用电器': ['热水器','冰箱','空调','洗衣机','微波炉','电饭煲','安装','出水','制冷','噪音','漏水','家电'],
+  '数码电子': ['手机','电脑','键盘','屏幕','电池','充电','耳机','平板','相机','路由','续航','像素'],
+  '服饰鞋包': ['衣服','鞋','包','裤','裙','尺码','面料','穿搭','色差','开胶','外套'],
+  '本地生活': ['酒店','餐厅','外卖','民宿','前台','房间','客房','送餐','隔音','服务','入住'],
+  '食品饮料': ['零食','牛奶','饮料','好吃','水果','咖啡','茶','巧克力','日期','口感','保质期']
+};
+const POS_WORDS = ['好','不错','满意','喜欢','推荐','舒服','快','专业','稳定','精彩','赞','完美','干净','新鲜','服帖','爱','值得','棒','优质'];
+const NEG_WORDS = ['差','不好','退','刺鼻','失望','慢','脏','吵','偏僻','发痒','崩','骗','坑','后悔','难用','过敏','漏水','开胶','色差','推脱','打不通','没法'];
+
+/* 统计词表命中次数（长词权重更高，避免「快」「好」这类单字刷分） */
+function hitScore(text, words){
+  let score = 0;
+  words.forEach(w => {
+    let idx = 0, hits = 0;
+    while ((idx = text.indexOf(w, idx)) !== -1){ hits++; idx += w.length; }
+    if (hits) score += hits * (w.length >= 2 ? 2 : 1);
+  });
+  return score;
+}
+
+function simulatePredict(text){
+  /* ① 命中真实实测样例 → 直接返回模型真实输出 */
+  const exact = MODEL_SAMPLES.find(s => s.text === text.trim());
+  if (exact){
+    return buildResult(text, exact.cat, exact.catId, exact.catConf,
+                              exact.sent, exact.sentId, exact.sentConf, true);
+  }
+
+  /* ② 关键词打分 */
+  const scores = CATEGORIES.map(c => ({ name: c, s: hitScore(text, CAT_KEYWORDS[c]) }));
+  scores.sort((a, b) => b.s - a.s);
+
+  const total = scores.reduce((n, x) => n + x.s, 0);
+  const best = scores[0];
+  const hitAny = best.s > 0;
+
+  /* 大类置信度：有命中则随得分上升，无命中则给出诚实的低置信度 */
+  const j1 = jitter(text, 'cat');
+  const catConf = hitAny
+    ? Math.min(0.9985, 0.74 + Math.min(0.24, best.s * 0.045) + j1 * 0.015)
+    : 0.34 + j1 * 0.18;
+  const catId = CATEGORIES.indexOf(best.name);
+
+  /* 情感：正负词得分比较 */
+  const ps = hitScore(text, POS_WORDS);
+  const ns = hitScore(text, NEG_WORDS);
+  const j2 = jitter(text, 'sent');
+  let sentId;
+  if (ps === ns) sentId = j2 > 0.5 ? 1 : 0;      // 打平按哈希决定，保证确定性
+  else sentId = ps > ns ? 1 : 0;
+
+  const margin = Math.abs(ps - ns);
+  const sentConf = Math.min(0.9988, 0.62 + Math.min(0.34, margin * 0.05) + j2 * 0.02);
+
+  return buildResult(text, best.name, catId, catConf,
+                           SENTIMENTS[sentId], sentId, sentConf, false);
+}
+
+/* 组装成与 predict.py 完全一致的返回结构 */
+function buildResult(text, cat, catId, catConf, sent, sentId, sentConf, isMeasured){
+  /* 其余类别的概率：按打分占比分配，无命中则均匀分配 */
+  const scores = CATEGORIES.map(c => ({ name: c, s: hitScore(text, CAT_KEYWORDS[c]) }));
+  const totalS = scores.reduce((n, x) => n + x.s, 0);
+  const rest = scores.filter(x => x.name !== cat);
+  let others;
+  if (totalS > 0){
+    const restSum = rest.reduce((n, x) => n + x.s, 0);
+    others = rest.map(x => ({
+      category: x.name,
+      probability: restSum > 0 ? (1 - catConf) * (x.s / restSum) : (1 - catConf) / rest.length
+    })).sort((a, b) => b.probability - a.probability);
+  } else {
+    others = rest.map(x => ({ category: x.name, probability: (1 - catConf) / rest.length }));
+  }
+
+  /* token 长度：中文近似 1 字 ≈ 1 token，再加 [CLS]/[SEP] 两个特殊符 */
+  const tokenLength = text.trim().length + 2;
+  const MAX_LEN = 256;
+
+  return {
+    text: text.trim(),
+    category: cat,
+    category_id: catId,
+    category_confidence: Number(catConf.toFixed(4)),
+    sentiment: sent,
+    sentiment_id: sentId,
+    sentiment_confidence: Number(sentConf.toFixed(4)),
+    top_categories: [
+      { category: cat, probability: Number(catConf.toFixed(4)) },
+      ...others.slice(0, 2).map(o => ({
+        category: o.category, probability: Number(o.probability.toFixed(4))
+      }))
+    ],
+    token_length: tokenLength,
+    truncated: tokenLength > MAX_LEN,
+    _measured: isMeasured          // 标记该结果是否来自真实模型实测
+  };
+}
+
+/* ---- 结果渲染 ---- */
+function renderResult(r){
+  const isPos = r.sentiment_id === 1;
+  const bar = (v, cls) => `
+    <div class="bar ${cls}"><i style="width:${(v * 100).toFixed(1)}%"></i></div>`;
+
+  /* 产出给后端/前端联调用的标准 JSON（与 predict.py 一致） */
+  const payload = {
+    text: r.text, category: r.category, category_id: r.category_id,
+    category_confidence: r.category_confidence, sentiment: r.sentiment,
+    sentiment_id: r.sentiment_id, sentiment_confidence: r.sentiment_confidence,
+    top_categories: r.top_categories, token_length: r.token_length, truncated: r.truncated
+  };
+
+  document.getElementById('classifyResult').innerHTML = `
+    <div class="card fade-in">
+      <div style="display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:26px">
+        <h3 class="card-title" style="flex:1 1 auto">分析结果</h3>
+        ${r._measured
+          ? '<span class="tag tag-blue">真实模型实测值</span>'
+          : '<span class="tag">前端模拟结果</span>'}
+        ${r.truncated
+          ? `<span class="tag tag-neg">已截断 · ${r.token_length} tokens</span>`
+          : `<span class="tag">${r.token_length} tokens</span>`}
+        <span class="tag" id="tTag">响应 —</span>
+      </div>
+
+      <div class="two-grid" style="gap:28px">
+        <div>
+          <div class="result-label">商品大类</div>
+          <div class="result-main">${r.category}</div>
+          <div style="margin-top:18px">
+            <div class="bar-row" style="margin-bottom:8px">
+              <span style="font-size:13px; color:var(--text-2)">置信度</span>
+              <span style="flex:1 1 auto"></span>
+              <span style="font-size:13px; font-weight:500; font-variant-numeric:tabular-nums">
+                ${(r.category_confidence * 100).toFixed(2)}%
+              </span>
+            </div>
+            ${bar(r.category_confidence, '')}
+          </div>
+        </div>
+
+        <div>
+          <div class="result-label">情感倾向</div>
+          <div class="result-main ${isPos ? 'sent-pos' : 'sent-neg'}">${r.sentiment}</div>
+          <div style="margin-top:18px">
+            <div class="bar-row" style="margin-bottom:8px">
+              <span style="font-size:13px; color:var(--text-2)">置信度</span>
+              <span style="flex:1 1 auto"></span>
+              <span style="font-size:13px; font-weight:500; font-variant-numeric:tabular-nums">
+                ${(r.sentiment_confidence * 100).toFixed(2)}%
+              </span>
+            </div>
+            ${bar(r.sentiment_confidence, isPos ? 'pos' : 'neg')}
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:30px">
+        <div class="result-label">候选大类</div>
+        ${r.top_categories.map(c => `
+          <div class="bar-row" style="margin-bottom:12px">
+            <span class="name">${c.category}</span>
+            ${bar(c.probability, '')}
+            <span class="val">${(c.probability * 100).toFixed(2)}%</span>
+          </div>`).join('')}
+      </div>
+
+      <!-- ---------- 响应耗时 ---------- -->
+      <div style="margin-top:30px; padding-top:26px; border-top:.5px solid var(--hairline)">
+        <div class="timing-head">
+          <div>
+            <div class="result-label" style="margin-bottom:6px">响应耗时</div>
+            <div class="timing-total" id="tTotal">—<span class="u"> ms</span></div>
+          </div>
+          <span style="flex:1 1 auto"></span>
+          <span style="font-size:11.5px; color:var(--text-2); text-align:right" id="tSession">
+            本次会话 0 次请求
+          </span>
+        </div>
+
+        <div class="timing-rows">
+          <div class="timing-row">
+            <span class="tn">预处理　文本规整、token 长度估算</span>
+            <span class="tv" id="tPre">—</span>
+          </div>
+          <div class="timing-row">
+            <span class="tn">计算　　模型推理${DEMO_MODE ? '（前端模拟）' : ''}</span>
+            <span class="tv" id="tInfer">—</span>
+          </div>
+          <div class="timing-row">
+            <span class="tn">渲染　　写入 DOM 并完成绘制</span>
+            <span class="tv" id="tRender">—</span>
+          </div>
+        </div>
+
+        <p class="timing-hint">
+          <b>计量方式</b>：浏览器 <code>performance.now()</code> 差值。起点为点击「开始分析」的时刻，
+          终点为结果完成绘制（<code>requestAnimationFrame</code> 回调）的时刻。
+          单位 <code>ms</code>，<code>≥1000 ms</code> 自动换算为 <code>s</code>（保留 2 位小数）。
+          三段之和恒等于上方总耗时。
+          <br>
+          <b>对照</b>：${MODEL_BASELINE}
+        </p>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:10px; margin-top:24px; flex-wrap:wrap">
+        <button class="ghost-btn" id="copyJson">复制 JSON</button>
+        <span style="font-size:12px; color:var(--text-2)">
+          返回结构与后端 <code>predict.py</code> 完全一致，可直接对接
+        </span>
+      </div>
+
+      <div class="json-box" id="jsonBox">${JSON.stringify(payload, null, 2)}</div>
+    </div>`;
+
+  /* 进度条入场：先渲染 0，再触发过渡生长 */
+  requestAnimationFrame(() => {
+    document.querySelectorAll('#classifyResult .bar > i').forEach(el => {
+      const w = el.style.width;
+      el.style.width = '0';
+      requestAnimationFrame(() => { el.style.width = w; });
+    });
+  });
+
+  document.getElementById('copyJson').onclick = () => {
+    const txt = JSON.stringify(payload, null, 2);
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(() => toast('已复制到剪贴板')).catch(() => toast('复制失败'));
+    } else {
+      toast('当前环境不支持剪贴板');
+    }
+  };
+}
+
+/* 分类结果的空状态 */
+function renderEmptyState(){
+  document.getElementById('classifyResult').innerHTML = `
+    <div class="card">
+      <div class="empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M4 6.5h16M4 12h16M4 17.5h9"/>
+        </svg>
+        <div>输入评论后点击「开始分析」查看结果</div>
+      </div>
+    </div>`;
+}
+
+/* ---- 分类交互 ---- */
+function runClassify(){
+  const t0 = performance.now();                 // 计时起点：点击「开始分析」的瞬间
+
+  const input = document.getElementById('classifyInput');
+  const text = input.value.trim();
+
+  if (!text){
+    toast('请先输入一条评论');
+    input.focus();
+    return;
+  }
+
+  const btn = document.getElementById('classifyBtn');
+
+  btn.disabled = true;
+  btn.textContent = '分析中…';
+
+  /* ---- ① 预处理：文本规整 + token 长度估算 ---- */
+  const prepared = text.replace(/\s+/g, ' ');
+  const t1 = performance.now();
+
+  /* ---- ② 计算：本地模拟推理 ---- */
+  const r = simulatePredict(prepared);
+  const t2 = performance.now();
+
+  /* ---- ③ 渲染：写入 DOM，再按「完成绘制」精修 ---- */
+  renderResult(r);
+  const t3 = performance.now();
+
+  /* 先在 DOM 写入完成时立即结算一次。
+     这一步不能省：requestAnimationFrame 在后台标签页、系统「减弱动态效果」
+     以及无头/截图环境下会被节流甚至完全不触发，只靠它收尾会导致耗时永远
+     停在占位符上（实测踩到过）。 */
+  applyTiming({ pre: t1 - t0, infer: t2 - t1, render: t3 - t2, total: t3 - t0 });
+
+  /* 浏览器正常绘制时，再用真正绘制完成的时刻精修一次 */
+  requestAnimationFrame(() => {
+    const t4 = performance.now();
+    applyTiming({ pre: t1 - t0, infer: t2 - t1, render: t4 - t2, total: t4 - t0 }, true);
+  });
+
+  btn.disabled = false;
+  btn.textContent = '开始分析';
+
+  /* --------------------------------------------------------------
+     切换到真实模型：把 ② 那段替换成下面的 fetch 即可。
+     届时把顶部的 DEMO_MODE 改成 false，「计算」这一段就是真实端到端耗时。
+
+     const t2 = performance.now();
+     const res  = await fetch(document.getElementById('apiField').value, {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({ texts: [prepared] })
+     });
+     const r = (await res.json())[0];
+     -------------------------------------------------------------- */
+}
+
+/* 把三段耗时写进结果卡，并更新会话统计
+   refine = true 表示这是绘制完成后的精修值，用它替换掉上一次的临时值 */
+function applyTiming(t, refine){
+  if (refine && SESSION_TIMES.length) SESSION_TIMES[SESSION_TIMES.length - 1] = t.total;
+  else SESSION_TIMES.push(t.total);
+
+  const set = (id, v) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const f = fmtMs(v);
+    el.textContent = '';                                  // 用文本节点写入，避免 < 被当作标签
+    el.append(f.num);
+    const u = document.createElement('span');
+    u.className = 'u';
+    u.textContent = ' ' + f.unit;
+    el.append(u);
+  };
+
+  set('tTotal', t.total);
+  set('tPre', t.pre);
+  set('tInfer', t.infer);
+  set('tRender', t.render);
+
+  /* 结果卡顶部的小标签，保持与明细同步 */
+  const tag = document.getElementById('tTag');
+  if (tag){
+    const f = fmtMs(t.total);
+    tag.textContent = `响应 ${f.num} ${f.unit}`;
+  }
+
+  /* 会话统计：让「随分析结果同步更新」这件事在页面上看得见 */
+  const el = document.getElementById('tSession');
+  if (el){
+    const n = SESSION_TIMES.length;
+    const avg = SESSION_TIMES.reduce((a, b) => a + b, 0) / n;
+    const f = fmtMs(avg);
+    el.textContent = `本次会话 ${n} 次请求 · 平均 ${f.num} ${f.unit}`;
+  }
+}
+
+
+/* ============================================================================
+   6. 导航 / 页面切换
+   ========================================================================== */
+
+let currentPage = 'overview';
+const initedPages = {};      // 图表懒加载：首次进入页面才初始化，避免无谓渲染
+
+function switchPage(name){
+  if (name === currentPage) return;
+  currentPage = name;
+
+  /* 侧边栏选中态 */
+  document.querySelectorAll('.nav-item[data-page]').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === name);
+  });
+
+  /* 页面淡入淡出 */
+  document.querySelectorAll('.page').forEach(el => {
+    el.classList.toggle('active', el.id === 'page-' + name);
+  });
+
+  /* 数字滚动（每次进入都重播，观感更好） */
+  document.querySelectorAll('#page-' + name + ' .stat-value[data-count]').forEach(countUp);
+
+  initChartsFor(name);
+
+  closeDrawer();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/* 图表懒初始化。整体包一层 try/catch：任何一张图出问题都不应影响其余功能。 */
+function initChartsFor(name){
+  if (initedPages[name]) { resizeCharts(); return; }
+  initedPages[name] = true;
+
+  try {
+    if (name === 'overview'){
+      mountChart('chartCategory', optCategory);
+      mountChart('chartSentiment', optSentiment);
+    } else if (name === 'sentiment'){
+      mountChart('chartTrend', optTrend);
+      mountChart('chartKeyword', optKeyword);
+      mountChart('chartNegCat', optNegCat);
+    } else if (name === 'board'){
+      mountChart('chartGoodRate', optGoodRate);
+    }
+  } catch (e) {
+    /* 静默降级：图表画不出来也要让页面其余部分照常可用 */
+    console.error('图表初始化失败:', e);
+  }
+}
+
+function resizeCharts(){
+  Object.values(charts).forEach(c => { try { c.resize(); } catch (e) {} });
+}
+
+/* ---- 移动端抽屉 ---- */
+function openDrawer(){
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('drawerMask').classList.add('open');
+}
+function closeDrawer(){
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('drawerMask').classList.remove('open');
+}
+
+
+/* ============================================================================
+   7. 初始化
+   ========================================================================== */
+document.addEventListener('DOMContentLoaded', () => {
+
+  /* 渲染静态内容 */
+  renderLatest();
+  renderAlerts();
+  renderModelInfo();
+  renderChips();
+
+  /* ---- 侧边栏点击 ---- */
+  document.querySelectorAll('.nav-item[data-page]').forEach(el => {
+    el.addEventListener('click', () => switchPage(el.dataset.page));
+  });
+
+  /* 移动端抽屉：复制一份导航进去 */
+  const drawerNav = document.getElementById('drawerNav');
+  drawerNav.innerHTML = document.getElementById('navList').innerHTML;
+  drawerNav.querySelectorAll('.nav-item[data-page]').forEach(el => {
+    el.addEventListener('click', () => switchPage(el.dataset.page));
+  });
+  document.getElementById('menuBtn').addEventListener('click', openDrawer);
+  document.getElementById('drawerMask').addEventListener('click', closeDrawer);
+
+  /* ---- 浮动预警卡片 ---- */
+  document.getElementById('alertClose').addEventListener('click', () => {
+    const el = document.getElementById('alertCard');
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(16px)';
+    setTimeout(() => { el.style.display = 'none'; toast('已收起预警卡片'); }, 300);
+  });
+  document.querySelectorAll('[data-goto]').forEach(el => {
+    el.addEventListener('click', () => switchPage(el.dataset.goto));
+  });
+
+  /* ---- 导航栏图标 ---- */
+  document.getElementById('searchBtn').addEventListener('click', () => {
+    switchPage('classify');
+    setTimeout(() => document.getElementById('classifyInput').focus(), 320);
+  });
+  document.getElementById('bellBtn').addEventListener('click', () => {
+    switchPage('board');
+    toast('3 条待处理差评');
+  });
+
+  /* ---- 评论分类 ---- */
+  const input = document.getElementById('classifyInput');
+  const charCount = document.getElementById('charCount');
+
+  input.addEventListener('input', () => {
+    const n = input.value.trim().length;
+    charCount.textContent = n + ' 字' + (n + 2 > 256 ? ' · 超出上限将截断' : '');
+    charCount.style.color = (n + 2 > 256) ? 'var(--neg)' : 'var(--text-2)';
+  });
+
+  /* 回车（不带 Shift）直接提交 */
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey){
+      e.preventDefault();
+      runClassify();
+    }
+  });
+
+  document.getElementById('classifyBtn').addEventListener('click', runClassify);
+
+  /* 清空按钮：恢复空状态 */
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    input.value = '';
+    charCount.textContent = '0 字';
+    charCount.style.color = 'var(--text-2)';
+    renderEmptyState();
+    input.focus();
+  });
+
+  /* 快捷样例点击即填入并自动分析 */
+  document.querySelectorAll('[data-sample]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const s = MODEL_SAMPLES[parseInt(chip.dataset.sample, 10)];
+      input.value = s.text;
+      input.dispatchEvent(new Event('input'));
+      runClassify();
+    });
+  });
+
+  /* ---- 设置页交互 ---- */
+  document.querySelectorAll('[data-switch]').forEach(sw => {
+    sw.addEventListener('click', () => {
+      sw.classList.toggle('on');
+      toast(sw.classList.contains('on') ? '已开启' : '已关闭');
+    });
+  });
+  const threshRange = document.getElementById('threshRange');
+  const threshVal = document.getElementById('threshVal');
+  paintSlider(threshRange);
+  threshRange.addEventListener('input', () => {
+    threshVal.textContent = parseFloat(threshRange.value).toFixed(2);
+    paintSlider(threshRange);
+  });
+
+  /* ---- 窗口尺寸变化：重算图表 ---- */
+  let rzTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(rzTimer);
+    rzTimer = setTimeout(() => {
+      resizeCharts();
+      if (window.innerWidth > 960) closeDrawer();
+    }, 160);
+  });
+
+  /* ---- 首屏 ----
+     顺序刻意如此：先把不依赖外部资源的部分全部铺好，图表初始化放最后。
+     这样即使 ECharts CDN 不可达导致图表失败，前面的内容也已经完整呈现。 */
+  renderEmptyState();
+  document.querySelectorAll('#page-overview .stat-value[data-count]').forEach(countUp);
+  initChartsFor('overview');
+});
+</script>
+
+</body>
+</html>
